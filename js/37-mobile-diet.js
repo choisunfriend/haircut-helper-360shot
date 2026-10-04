@@ -58,7 +58,7 @@
     freeFull: true,      // ③ 3D 화면에 들어갈 때 전체 가닥 기억 비움
     lite: true,          // ⑥ (2026-10-04f) 조정 화면의 헤어는 가볍게(사진 색 입히기·코팅·음영 없이)
     bgFull: true,        // ⑥ 조정 화면이 한가할 때 3D 결과 화면용 완성본(전체 가닥·색·음영)을 뒤에서 미리 만듦
-    bgDelayMs: 500,      //    조정 화면 헤어가 뜬 뒤 이만큼 조용하면 시작
+    bgDelayMs: 250,      //    조정 화면 헤어가 뜬 뒤 이만큼 조용하면 시작 (2026-10-04g: 500 → 250)
     bgSliceMs: 12        //    한 번에 일하는 시간
   }, W.MOBILE_DIET || {});
   var S = D.stats = { freedFull: 0, bufReuse: 0, deferred: 0, lastRenderMs: 0, pruned: 0, released: 0, preHit: 0, preResume: 0, preCold: 0, preFallback: 0, preBuiltMs: 0, lastBuild: null, lastShow: null };

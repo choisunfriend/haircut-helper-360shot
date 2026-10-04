@@ -121,6 +121,7 @@
         var qx = Q.x, qy = Q.y - cy, qz = Q.z, qq = qx * qx / (a * a) + qy * qy / (b * b) + qz * qz / (c * c);
         if (qq < 1 && qq > 0) { var k = 1 / Math.sqrt(qq); Q.x = qx * k; Q.y = cy + qy * k; Q.z = qz * k; S.pushed++; }
       }
+      try { if (W.REGROW && typeof W.REGROW.neckPush === 'function') { var Qn = W.REGROW.neckPush(Q); if (Qn !== Q) { Q = Qn; S.neck = (S.neck || 0) + 1; } } } catch (en) {}   // (2026-10-04g) 목 안으로 못 들어감
       var real = Math.hypot(Q.x - P.x, Q.y - P.y, Q.z - P.z);
       if (!(real > h * 0.05)) {                  // 거의 못 나감(막힘) — 옆으로 한 걸음 비켜서 계속
         Q = { x: P.x + hx * h, y: P.y, z: P.z + hz * h };
@@ -160,7 +161,7 @@
     var L = ppl.apply(this, arguments) || [];
     var avg = S.grown ? (S.addCm / S.grown) : 0;
     return L.concat([TAG + ' ' + (N.on ? '켜짐' : '꺼짐') + ' — 늘린 부분은 중력·두상을 따라 이어 기름 · 늘린 가닥 누적 ' + S.grown +
-      ' · 평균 +' + avg.toFixed(1) + 'cm · 두상 밖으로 밀어냄 ' + S.pushed + '걸음 · 면 타고 흐름 ' + S.slid + '걸음' + (S.err ? ' · ⚠ ' + S.err : '')]);
+      ' · 평균 +' + avg.toFixed(1) + 'cm · 두상 밖으로 밀어냄 ' + S.pushed + '걸음 · 면 타고 흐름 ' + S.slid + '걸음 · 목 밖으로 ' + (S.neck || 0) + '걸음' + (S.err ? ' · ⚠ ' + S.err : '')]);
   };
 
   try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}

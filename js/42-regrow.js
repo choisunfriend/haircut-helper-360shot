@@ -83,6 +83,8 @@
     backFix: true,
     freeDepth: 0.6,     // 두피 밖 구간에서 사진 결이 지어낼 수 있는 깊이(카메라 쪽/반대쪽) 움직임 상한(가로·세로 움직임의 몇 배)
     backFrom: 0.1, backFull: 0.5,   // 두피를 벗어난 자리가 얼마나 뒤쪽인가(0 = 귀 옆 · 1 = 정뒤) — 이 구간에서 0→1로 막음
+    // (2026-10-04g) 목 — 늘어뜨린 가닥이 목(과 그 아래 몸통 기둥) 안으로 못 들어가게. 화면에 보이는 목과 같은 치수.
+    neck: true, neckMargin: 1.1,
     sliceMs: 30,
     seed: 20261003
   }, W.REGROW || {});
@@ -91,6 +93,34 @@
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
   function q(a, f) { if (!a.length) return NaN; var b = a.slice().sort(function (x, y) { return x - y; }); return b[Math.min(b.length - 1, Math.floor(b.length * f))]; }
   function n1(v) { return isFinite(v) ? (Math.round(v * 10) / 10).toFixed(1) : '?'; }
+
+  /* (2026-10-04g) 목 기둥 밖으로 밀어내기 — 12a의 목 메쉬와 같은 치수(밑동 폭×깊이 cm ÷ 얼굴 환산자, 윗단 = 턱 + 0.12).
+     목 아래(어깨·몸통)는 모양을 모르므로 같은 굵기의 기둥으로만 봅니다(어깨에 얹히는 것은 아직 아님). 47번(길이 늘리기)도 씁니다. */
+  var neckMemo = null, neckAt = 0;
+  function neckDims() {
+    var t = now();
+    if (neckMemo && t - neckAt < 1000) return neckMemo;
+    neckAt = t; neckMemo = { ok: false };
+    try {
+      var fm = getFaceMetrics(), top = 0.15 - 0.7 * fm.heightFactor + NECK_SHAPE.topAboveChin, cm = 16.4;
+      try { var r = faceRulerCmPerUnit(fm); if (r && r.x > 1) cm = r.x; } catch (e) {}
+      var hw = NECK_SHAPE.baseWCm / 2 / cm, hd = NECK_SHAPE.baseDCm / 2 / cm;
+      if (isFinite(top) && hw > 0.01 && hd > 0.01) neckMemo = { ok: true, top: top, hw: hw, hd: hd, back: NECK_SHAPE.napeFull || 1 };
+    } catch (e) {}
+    return neckMemo;
+  }
+  G.neckPush = function (p) {
+    if (!G.neck) return p;
+    var N = neckDims();
+    if (!N.ok || !(p.y < N.top)) return p;
+    var t = Math.min(1, (N.top - p.y) / 0.06), m = G.neckMargin * (0.7 + 0.3 * t);          // 윗단에서 턱이 지지 않게 서서히
+    var hw = N.hw * m, hd = N.hd * m * (p.z < 0 ? N.back : 1);
+    var e = p.x * p.x / (hw * hw) + p.z * p.z / (hd * hd);
+    if (e >= 1) return p;
+    if (e < 1e-6) return { x: p.x, y: p.y, z: -hd };                                        // 한가운데 — 뒤로
+    var k = 1 / Math.sqrt(e);
+    return { x: p.x * k, y: p.y, z: p.z * k };
+  };
 
   /* ────────────────────────────────────────────────────────────────────────
    * 만들기
@@ -352,7 +382,7 @@
     var total = (W.STRAND_BUDGET && W.STRAND_BUDGET.on !== false && W.STRAND_BUDGET.total > 0) ? W.STRAND_BUDGET.total : photo.strands.length;
 
     var st = { n: 0, stub: 0, skipped: 0, steps: 0, est: 0, stopMask: 0, stopCap: 0, stopMax: 0, free: 0, flipped: 0,
-      backN: 0, backFwd: 0, backKeep: 0, backLen: [],
+      backN: 0, backFwd: 0, backKeep: 0, backLen: [], neckPush: 0,
       len: [], kink: [], sec: {} };
     var down = { x: 0, y: -1, z: 0 };
 
@@ -428,8 +458,14 @@
           d = { x: gx / gl, y: gy / gl, z: gz / gl };
           var Q = { x: P.x + d.x * stp, y: P.y + d.y * stp, z: P.z + d.z * stp };
           try { Q = ellipsoidPushOut(Q, Es.a * 1.02, Es.b * 1.02, Es.c * 1.02, CY); } catch (e) {}
+          var Qn = G.neckPush(Q); if (Qn !== Q) { Q = Qn; st.neckPush++; }
           var vq = vote(Q);
-          if (vq === 0 && myTip != null && Q.y > myTip) { vq = 1; st.backKeep++; }   // 뒤 사진의 머리 끝 높이까지는 이어 감
+          // 뒤 사진의 머리 끝 높이까지는 이어 감 — (2026-10-04g) 아래로 늘어지는 중이고 두상 폭 안쪽일 때만.
+          // 실측: 위·옆으로 튀어 나간 가닥까지 이어 가서 머리 밖으로 큰 고리가 몇 가닥 생겼음.
+          if (vq === 0 && myTip != null && Q.y > myTip && d.y < -0.5) {
+            var fx = Q.x / (Es.a * 1.3), fz2 = Q.z / (Es.c * 1.3);
+            if (fx * fx + fz2 * fz2 <= 1) { vq = 1; st.backKeep++; }
+          }
           if (vq === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
           pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; prev = d;
         }
@@ -498,7 +534,7 @@
           isLong: isLong, capTxt: Object.keys(cap).map(function (k) { return k + ' ' + n1(cap[k] * cm); }).join(' · '),
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
           cams: cams.map(function (c) { return c.angle; }).join(','),
-          backFix: !!G.backFix, backN: st.backN, backFwd: st.backFwd, backKeep: st.backKeep, backLenMed: q(st.backLen, 0.5) * cm,
+          neckPush: st.neckPush, backFix: !!G.backFix, backN: st.backN, backFwd: st.backFwd, backKeep: st.backKeep, backLenMed: q(st.backLen, 0.5) * cm,
           backTipN: backTips.length, backTipCm: backTipOK ? (yTop - q(backTips, 0.5)) * cm : NaN
         };
         return { strands: out, viewCal: photo.viewCal, yTop: photo.yTop, CY: photo.CY, field: photo.field || null, occ: photo.occ || null,
@@ -901,6 +937,7 @@
     L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음) ' + s.flipped);
     if (s.backFix) L.push('  뒷머리 앞쏠림 막기 — 뒤쪽에서 두피를 벗어난 가닥 ' + s.backN + '개(길이 중앙값 ' + n1(s.backLenMed) + 'cm) · 앞으로 가려던 걸음 ' + s.backFwd + '회 막음 · 뒤 사진 끝 높이까지 이어 간 걸음 ' + s.backKeep +
       (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
+    L.push('  목: ' + (G.neck ? '켜짐 — 목 안으로 들어가려던 걸음 ' + (s.neckPush || 0) + '회 밖으로 밀어냄' : '꺼짐'));
     L.push('  두께(두피→머리 겉면) 중앙값 ' + n1(s.tMed) + 'cm · p90 ' + n1(s.tP90) + 'cm · 윤곽선으로 잰 칸 ' + s.tMeasured + ' · 이웃으로 메운 칸(추정) ' + s.tFilled + ' · 두께 0으로 잰 칸 ' + s.tZero + ' / 전체 ' + s.cells);
     return L;
   };

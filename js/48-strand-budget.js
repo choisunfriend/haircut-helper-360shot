@@ -27,7 +27,19 @@
 (function () {
   'use strict';
   var W = window, TAG = '[가닥 수]';
-  var B = W.STRAND_BUDGET = Object.assign({ on: true, total: 30000, adjust: 10000, keepAll: ['front', 'temple'] }, W.STRAND_BUDGET || {});
+  /* (2026-10-04g) 고사양 폰은 조정 화면도 25,000가닥 — 사용자: "고사양폰은 한 2만5천 가닥 해도 상관없겠다."
+     고사양 = 기기 메모리 8GB 이상(크롬이 알려 주는 최댓값) · 메모리를 안 알려 주는 브라우저(아이폰 등)는 코어 6개 이상이고 저사양 판정이 아니면. */
+  function highEnd() {
+    try {
+      if (typeof isLowMemDevice === 'function' && isLowMemDevice()) return false;
+      var dm = navigator.deviceMemory, hc = navigator.hardwareConcurrency || 0;
+      if (typeof dm === 'number' && dm > 0) return dm >= 8;
+      return hc >= 6;
+    } catch (e) { return false; }
+  }
+  var B = W.STRAND_BUDGET = Object.assign({ on: true, total: 30000, adjustLow: 10000, adjustHigh: 25000, keepAll: ['front', 'temple'] }, W.STRAND_BUDGET || {});
+  B.highEnd = highEnd();
+  if (!(B.adjust > 0)) B.adjust = B.highEnd ? B.adjustHigh : B.adjustLow;
   var S = B.stats = { lastAdjust: 0, lastFull: 0, bySec: null };
 
   function scr() { try { return currentScreen; } catch (e) { return ''; } }
@@ -114,7 +126,7 @@
   if (typeof ppl === 'function') W.perfPanelLines = function () {
     var L = ppl.apply(this, arguments) || [], m = model(), n = m ? m.strands.length : 0, by = S.bySec, parts = [];
     if (by) Object.keys(by).forEach(function (k) { parts.push(k + ' ' + by[k][0] + '/' + by[k][1]); });
-    return L.concat([TAG + ' ' + (B.on ? '켜짐' : '꺼짐') + ' · 목표: 모델 ' + B.total + ' / 조정 화면 ' + B.adjust + ' (전부 남기는 섹션: ' + ((B.keepAll || []).join(',') || '없음') + ')' +
+    return L.concat([TAG + ' ' + (B.on ? '켜짐' : '꺼짐') + ' · 목표: 모델 ' + B.total + ' / 조정 화면 ' + B.adjust + (B.highEnd ? '(고사양)' : '(저사양)') + ' (전부 남기는 섹션: ' + ((B.keepAll || []).join(',') || '없음') + ')' +
       ' · 지금 모델 ' + n + '가닥' + (m && m.mannequin ? '(마네킹)' : m && m.regrown ? '(다시 기른 머리)' : '(사진 가닥)') +
       ' · 직전에 그린 수 — 조정 화면 ' + (S.lastAdjust || '—') + ' · 3D 결과 화면 ' + (S.lastFull || '—') +
       (parts.length ? '\n  조정 화면에 남긴 가닥(남김/전체): ' + parts.join(' · ') : '')]);
