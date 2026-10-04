@@ -55,6 +55,7 @@
     return keep;
   }
   B.maskFor = function (m) {
+    if (B.forceFull) return null;                                  // 37번이 조정 화면에서 3D 결과 화면용 완성본을 뒤에서 만드는 중
     if (!B.on || scr() !== 'adjust' || !(B.adjust > 0) || !m || !m.strands) return null;
     var n = m.strands.length;
     if (n <= B.adjust) return null;
@@ -83,7 +84,7 @@
         return out;
       }
       out = origCA.apply(this, arguments);
-      if (out && out.length) { if (scr() === 'adjust') S.lastAdjust = out.length; else S.lastFull = out.length; }
+      if (out && out.length) { if (scr() === 'adjust' && !B.forceFull) S.lastAdjust = out.length; else S.lastFull = out.length; }
       return out;
     }
     return origCA.apply(this, arguments);

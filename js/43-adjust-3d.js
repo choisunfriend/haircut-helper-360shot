@@ -165,10 +165,8 @@
     busy = true; again = false;
     var t0 = now(), my = ++gen, D = W.MOBILE_DIET;
     S.builds++;
-    setChip('머리 만드는 중…');
-    var pr = (D && typeof D.prepare3D === 'function')
-      ? D.prepare3D(function (f) { if (my === gen) setChip('머리 만드는 중… ' + Math.round(f * 100) + '%'); })
-      : Promise.resolve(false);
+    // (2026-10-04f) "머리 만드는 중… ○○%" 표시는 뺌(사용자 요청) — 조정 화면 헤어는 가볍게 만들어 금방 바뀜
+    var pr = (D && typeof D.prepare3D === 'function') ? D.prepare3D() : Promise.resolve(false);
     pr.then(function () {
       busy = false;
       if (my !== gen || !active()) { setChip(''); return; }

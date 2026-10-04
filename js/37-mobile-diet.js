@@ -55,7 +55,11 @@
     showTogether: true,  // ⑤ 3D 장면을 다 붙은 뒤 한꺼번에 보여 주기
     prune: true,         // ③ 옛 상태 캐시 즉시 버림
     release3D: true,     // ③ 3D 화면 나갈 때 장면 반납
-    freeFull: true       // ③ 3D 화면에 들어갈 때 전체 가닥 기억 비움
+    freeFull: true,      // ③ 3D 화면에 들어갈 때 전체 가닥 기억 비움
+    lite: true,          // ⑥ (2026-10-04f) 조정 화면의 헤어는 가볍게(사진 색 입히기·코팅·음영 없이)
+    bgFull: true,        // ⑥ 조정 화면이 한가할 때 3D 결과 화면용 완성본(전체 가닥·색·음영)을 뒤에서 미리 만듦
+    bgDelayMs: 500,      //    조정 화면 헤어가 뜬 뒤 이만큼 조용하면 시작
+    bgSliceMs: 12        //    한 번에 일하는 시간
   }, W.MOBILE_DIET || {});
   var S = D.stats = { freedFull: 0, bufReuse: 0, deferred: 0, lastRenderMs: 0, pruned: 0, released: 0, preHit: 0, preResume: 0, preCold: 0, preFallback: 0, preBuiltMs: 0, lastBuild: null, lastShow: null };
 
@@ -134,6 +138,7 @@
     if (cur === lastState) return;
     lastState = cur;
     if (pre.sig) dropPre();                       // 미리 만든 3D 헤어도 옛 상태 것
+    if (bg.sig) dropBg();
     try {
       var dead = [];
       ADJ_CACHE._map.forEach(function (v, k) { if (normKey(k) !== cur) dead.push(k); });
@@ -210,31 +215,132 @@
    * ────────────────────────────────────────────────────────────────────── */
   var pre = { sig: null, obj: null, ready: false, job: null, tries: 0 };
   /* 버퍼 한 벌을 돌려 씀 — 값이 바뀔 때마다 수십 MB를 새로 잡았다 버리지 않게 */
-  var pool = { pos: null, col: null };
+  /* (2026-10-04f) 두 벌까지 — 조정 화면용(작은 것)과 3D 결과 화면용(큰 것)이 번갈아 쓰이므로 크기가 맞는 것만 꺼냄 */
+  var pools = [];
   function recycle(b) {
     if (!b || !b.pos || !b.col) return;
-    if (!pool.pos || b.pos.length > pool.pos.length) { pool.pos = b.pos; pool.col = b.col; }
+    for (var i = 0; i < pools.length; i++) if (pools[i].pos === b.pos) return;
+    pools.push({ pos: b.pos, col: b.col });
+    if (pools.length > 2) {                                           // 가장 큰 것과 가장 작은 것만 남김
+      pools.sort(function (x, y) { return x.pos.length - y.pos.length; });
+      pools.splice(1, pools.length - 2);
+    }
   }
   function takeBufs(need) {
-    if (pool.pos && pool.pos.length >= need && pool.col.length >= need) {
-      var b = { pos: pool.pos, col: pool.col }; pool.pos = pool.col = null; S.bufReuse++; return b;
+    var best = -1;
+    for (var i = 0; i < pools.length; i++) {
+      var L = pools[i].pos.length;
+      if (L >= need && pools[i].col.length >= need && L <= need * 2.2 && (best < 0 || L < pools[best].pos.length)) best = i;
     }
-    pool.pos = pool.col = null;
+    if (best >= 0) { var b = pools.splice(best, 1)[0]; S.bufReuse++; return b; }
+    for (i = pools.length - 1; i >= 0; i--) if (pools[i].pos.length < need) pools.splice(i, 1);   // 모자란 것은 버림
     var cap = Math.ceil(need * 1.05 / 6) * 6;
     return { pos: new Float32Array(cap), col: new Uint8Array(cap) };
+  }
+  /* ⑥ (2026-10-04f) 조정 화면은 가볍게 · 완성본은 뒤에서
+     사용자: "조정에서 음영이랑 코팅·색 입히기까지는 필요 없다. 조정에 필요한 것만 먼저 그리고, 나머지는 그 뒤 시간에
+     계속 계산해서 3D 결과보기 시간도 아끼자."
+       · 조정 화면의 헤어(lite) = 고른 가닥만 · 가닥 색 한 가지(가닥마다 밝기만 조금 다르게) · 사진 색 입히기/코팅/음영 없음.
+         모양(길이·컬·다발·웨이브 다듬기)은 완성본과 같습니다.
+       · 그 헤어가 뜬 뒤 조용하면, 3D 결과 화면용 완성본(전체 가닥 + 사진 색 + 음영)을 뒤에서 조금씩 만듭니다(bg).
+         값을 다시 움직이면 버리고 새로 시작. 3D 결과보기를 누르면 다 된 것은 바로 받아 쓰고, 덜 됐으면 이어서 만듭니다. */
+  var bg = { sig: null, obj: null, ready: false, job: null };
+  var forcing = false, preparing = 0, bgTimer = null, lastTouch = 0;
+  try {
+    ['pointerdown', 'pointermove', 'touchmove', 'wheel'].forEach(function (ev) {
+      document.addEventListener(ev, function (e) { if (ev !== 'pointermove' || (e && e.buttons)) lastTouch = now(); }, { capture: true, passive: true });
+    });
+  } catch (e) {}
+  function isLite() { return D.lite !== false && !!D.externalDriver && !forcing && scr() === 'adjust'; }
+  function withFull(fn) {                                             // 조정 화면에 있으면서 "3D 결과 화면이라면"으로 계산
+    var SBg = W.STRAND_BUDGET, was = forcing, wasB = SBg ? SBg.forceFull : false;
+    forcing = true; if (SBg) SBg.forceFull = true;
+    try { return fn(); } finally { forcing = was; if (SBg) SBg.forceFull = wasB; }
+  }
+  function dropBg() {
+    try {
+      if (bg.job && bg.job.bufs) recycle(bg.job.bufs);
+      var o = bg.obj;
+      if (o && !o.parent && o.userData && o.userData._bufs) {
+        try { o.geometry.dispose(); } catch (e) {}
+        recycle(o.userData._bufs); o.userData._bufs = null;
+      }
+    } catch (e2) {}
+    bg.sig = null; bg.obj = null; bg.ready = false; bg.job = null;
+  }
+  /* 지금 pre에 든 것이 완성본(또는 만들던 완성본)이면 버리지 않고 bg로 옮김. true = 옮김 */
+  function parkPreAsBg() {
+    if (pre.lite !== false || !pre.sig) return false;
+    if (!(pre.job || (pre.ready && pre.obj && !pre.obj.parent))) return false;
+    dropBg();
+    bg.sig = pre.sig; bg.obj = pre.ready ? pre.obj : null; bg.ready = !!pre.ready; bg.job = pre.job || null;
+    pre.sig = null; pre.obj = null; pre.ready = false; pre.job = null; pre.tries = 0; pre.entryMade = false; pre.lite = null;
+    return true;
+  }
+  /* 뒤에서 만든(만들던) 완성본이 지금 필요한 것이면 pre로 가져옴. true = 가져옴 */
+  function adoptBg(sig) {
+    if (!bg.sig || bg.sig !== sig || !(bg.ready || bg.job)) return false;
+    if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+    if (pre.sig && pre.sig !== sig) dropPre();
+    pre.sig = sig; pre.obj = bg.obj; pre.ready = bg.ready; pre.job = bg.job; pre.entryMade = false; pre.lite = false;
+    if (bg.ready) S.bgHit = (S.bgHit || 0) + 1; else S.bgResume = (S.bgResume || 0) + 1;
+    bg.sig = null; bg.obj = null; bg.ready = false; bg.job = null;
+    return true;
+  }
+  function scheduleBg(delay) {
+    if (!D.on || D.bgFull === false || !D.pre3D) return;
+    if (bgTimer) clearTimeout(bgTimer);
+    bgTimer = setTimeout(bgTick, delay == null ? D.bgDelayMs : delay);
+  }
+  function bgTick() {
+    bgTimer = null;
+    if (!D.on || D.bgFull === false || !D.pre3D || !D.externalDriver || scr() !== 'adjust') return;
+    if (preparing > 0 || drag.el || drag.pending) return scheduleBg(300);
+    if (now() - lastTouch < 250) return scheduleBg(120);              // 손으로 돌리는 중에는 쉼
+    var model = neutral();
+    if (!model || !canStream()) return;
+    var sig;
+    try { sig = withFull(function () { return fullSig(model); }); } catch (e) { return; }
+    if (bg.sig !== sig) { dropBg(); bg.sig = sig; }
+    if (bg.ready) return;
+    try {
+      withFull(function () {
+        if (!bg.job) {
+          var Q = W.GYEOL_3D;
+          if (Q && typeof Q.warmStep === 'function' && Q.warmStep(D.bgSliceMs) < 1) return;   // 가닥 계산의 남은 부분
+          bg.job = new Job(sig, model);
+        }
+        bg.job.step(D.bgSliceMs);
+      });
+    } catch (e) { console.warn(TAG + ' 완성본 미리 만들기 중단 — 3D 결과 화면에 들어갈 때 만듭니다', e); dropBg(); return; }
+    if (!bg.job || !bg.job.done) return scheduleBg(6);
+    var job = bg.job, still = null; bg.job = null;
+    try { still = withFull(function () { return fullSig(model); }); } catch (e) {}
+    if (still !== sig) {
+      try { if (job.obj && job.obj.userData) recycle(job.obj.userData._bufs); } catch (e) {}
+      dropBg(); return scheduleBg();
+    }
+    bg.obj = job.obj; bg.ready = true;
+    S.bgBuilt = (S.bgBuilt || 0) + 1;
+    S.lastFullBuild = { how: '뒤에서 미리', ms: Math.round(job.ms), calc: Math.round(job.tm[0]), write: Math.round(job.tm[1]), shade: Math.round(job.tm[2]), strands: job.count || 0 };
+    try {                                                              // 다 만들었으니 가닥 기억은 비움
+      ADJ_CACHE._map.clear(); ADJ_CACHE._lru = [];
+      var Q2 = W.GYEOL_3D; if (Q2 && typeof Q2.dropMemo === 'function') { Q2.dropMemo(); S.freedFull++; }
+    } catch (e) {}
+    console.log(TAG + ' 3D 결과 화면용 완성본을 뒤에서 미리 만듦 — 가닥 ' + (job.count || 0) + '개 · 일한 시간 ' + Math.round(job.ms) + 'ms');
   }
   /* (2026-10-04e) 조정 화면용 헤어 보관 — 3D 결과 화면에 가 있는 동안 조정 화면의 헤어(1만 가닥)를 버리지 않고
      CPU 버퍼만 들고 있다가(화면 메모리는 내림), 돌아오면 다시 만들지 않고 그대로 붙입니다.
      돌아오는 순간 3D 결과 화면용(3만 가닥)은 버퍼까지 버리므로 큰 것 두 벌을 같이 들고 있지 않습니다. */
   var stash = null;
   function stashForReturn() {
-    if (D.stash === false || !pre.ready || !pre.obj || pre.job) return;
+    if (D.stash === false || !pre.ready || !pre.obj || pre.job || pre.lite !== true) return;
     releaseStash();
     var o = pre.obj;
     try { if (o.parent) o.parent.remove(o); } catch (e) {}
     try { o.geometry.dispose(); } catch (e) {}                     // 화면(GPU) 쪽만 내림 — 버퍼는 그대로
     stash = { sig: pre.sig, obj: o };
-    pre.sig = null; pre.obj = null; pre.ready = false; pre.tries = 0; pre.entryMade = false;
+    pre.sig = null; pre.obj = null; pre.ready = false; pre.tries = 0; pre.entryMade = false; pre.lite = null;
     S.stashKept = (S.stashKept || 0) + 1;
   }
   function releaseStash() {
@@ -257,9 +363,8 @@
       return false;
     }
     var o = stash.obj; stash = null;
-    dropPre();                                                     // 3D 결과 화면용 헤어
-    pool.pos = pool.col = null;                                    // 그 큰 버퍼도 풀에 남기지 않음
-    pre.sig = sig; pre.obj = o; pre.ready = true; pre.entryMade = false;
+    if (!parkPreAsBg()) dropPre();                                 // 3D 결과 화면용 완성본은 다시 갈 때 쓰게 둠(화면 메모리는 이미 내림)
+    pre.sig = sig; pre.obj = o; pre.ready = true; pre.entryMade = false; pre.lite = true;
     S.stashHit = (S.stashHit || 0) + 1;
     return true;
   }
@@ -272,7 +377,7 @@
         recycle(o.userData._bufs); o.userData._bufs = null;
       }
     } catch (e2) {}
-    pre.sig = null; pre.obj = null; pre.ready = false; pre.job = null; pre.tries = 0; pre.entryMade = false;
+    pre.sig = null; pre.obj = null; pre.ready = false; pre.job = null; pre.tries = 0; pre.entryMade = false; pre.lite = null;
   }
   /* 3D 결과 화면에 들어가면(헤어 완성본을 붙인 뒤) 그걸 만드는 데 쓴 "전체 가닥" 기억을 비움.
      조정 화면에서는 뷰를 바꿀 때 빨리 그리려고 들고 있지만, 3D 화면에 있는 동안은 쓸 일이 없음. */
@@ -303,6 +408,7 @@
     try { a.push(modelCmPerUnit()); } catch (e) { a.push('-'); }
     try { var E = getHeadEllipsoid(); a.push(E.a + ',' + E.b + ',' + E.c); } catch (e) { a.push('-'); }
     a.push(typeof SCALP_CENTER_Y !== 'undefined' ? SCALP_CENTER_Y : '-', model.CY, model.yTop, J(model.viewCal));
+    a.push(isLite() ? 'lite' : 'full');
     return a.join('\u00a7');
   }
 
@@ -311,6 +417,7 @@
     this.sig = sig; this.model = model; this.stage = 0; this.done = false; this.obj = null;
     this.i = 0; this.cur = 0; this.pix = 0; this.ms = 0; this.frac = 0;
     this.tm = [0, 0, 0];   // 단계별 ms: 가닥 계산(init) · 가닥 쓰기(다듬기·뭉치기·색) · 음영
+    this.lite = isLite();  // 조정 화면용: 사진 색 입히기·코팅·음영 없이
   }
   Job.prototype.finish = function (obj) { this.obj = obj; this.done = true; this.frac = 1; this.list = this.rep = this.repCache = null; };
 
@@ -321,6 +428,7 @@
     if (!list || !list.length) return this.finish(null);
     this.list = list;
     this.gcfg = GW && GW.cfg && Array.isArray(list) ? GW.cfg() : null;
+    if (this.lite && this.gcfg && this.gcfg.shape === false) this.gcfg = null;   // 코팅만 하는 스타일(모양 그대로) — 조정 화면에선 건너뜀
     this.gcpu = this.gcfg ? GW.cpu() : 0;
     var n = list.length, i;
 
@@ -401,12 +509,21 @@
     }
     if (!pts || pts.length < 2) return;
 
-    var ang = g.srcAngle || (pts[0] ? viewOfRoot(pts[0]) : null);
-    var cols = HAIR_PIXEL_COLOR.reproject && ang ? bakeStrandColors3D(pts, this.model, ang, g.color, g.colors, g.dye) : (g.colors || null);
+    var cols = null;
+    if (!this.lite) {
+      var ang = g.srcAngle || (pts[0] ? viewOfRoot(pts[0]) : null);
+      cols = HAIR_PIXEL_COLOR.reproject && ang ? bakeStrandColors3D(pts, this.model, ang, g.color, g.colors, g.dye) : (g.colors || null);
+    }
     var use = cols && cols.length > 1 ? cols : null;
     if (use) this.pix++;
     var n = pts.length, m = use ? use.length : 0, C = this.color, P = this.pos, K = this.col, o = this.cur;
-    if (!use) C.set(g.color || '#1a1a1a');
+    if (!use) {
+      try { C.set(g.color || '#1a1a1a'); } catch (e0) { C.set('#1a1a1a'); }
+      if (this.lite) {                                // 가닥마다 밝기를 조금 다르게 — 한 덩어리로 뭉개져 보이지 않게
+        var jf = 0.78 + 0.5 * (((i * 2654435761) >>> 0) / 4294967296);
+        C.r *= jf; C.g *= jf; C.b *= jf;
+      }
+    }
     var ci = 0, lim = use ? Math.round((ci + 1) * (n - 1) / m) : n - 1;
     if (use) try { C.set(use[0]); } catch (e) { C.set(g.color || '#1a1a1a'); }
     for (var q = 1; q < n; q++) {
@@ -436,6 +553,7 @@
     obj.name = 'adjustedHair';
     obj.userData._bufs = this.bufs; this.bufs = null;
     this.obj = obj;
+    if (this.lite) return this.finish(obj);          // 조정 화면용은 음영 없음
 
     // 음영(24번 shadeHairObject와 같은 식 — 색 버퍼에 바로 덮어씀)
     var SB = W.STYLE_BASE, sh = SB && SB.on && ((SB.active && SB.active.shade) || SB.shade);
@@ -564,12 +682,13 @@
       try { if (job.obj) recycle(job.obj.userData._bufs); } catch (e) {}
       dropPre(); return schedulePre();
     }
-    pre.obj = job.obj; pre.ready = true; S.preBuiltMs = job.ms; noteBuild(job, '미리');
+    pre.obj = job.obj; pre.ready = true; pre.lite = !!job.lite; S.preBuiltMs = job.ms; noteBuild(job, '미리');
     console.log(TAG + ' 3D 헤어 미리 만들기 끝 — 가닥 ' + (job.count || 0) + '개 · 선분 ' + (job.obj ? job.pos.length / 6 : 0) +
       '개 · 일한 시간 ' + Math.round(job.ms) + 'ms (조금씩 나눠서) · 3D 결과보기는 이걸 받아 씁니다');
   }
 
   function noteBuild(job, how) {
+    if (!job.lite) S.lastFullBuild = { how: how, ms: Math.round(job.ms), calc: Math.round(job.tm[0]), write: Math.round(job.tm[1]), shade: Math.round(job.tm[2]), strands: job.count || 0 };
     S.lastBuild = { how: how, ms: Math.round(job.ms), calc: Math.round(job.tm[0]), write: Math.round(job.tm[1]), shade: Math.round(job.tm[2]), strands: job.count || 0 };
   }
 
@@ -580,7 +699,11 @@
    *   돌려주는 값(Promise): true = 헤어가 준비됨 · false = 못 함(원래 경로가 진입 때 만듦)
    * ────────────────────────────────────────────────────────────────────── */
   D.prepare3D = function (onProg) {
-    return new Promise(function (res) {
+    return new Promise(function (res0) {
+      preparing++;
+      if (bgTimer) { clearTimeout(bgTimer); bgTimer = null; }
+      var settled = false;
+      function res(v) { if (settled) return; settled = true; preparing = Math.max(0, preparing - 1); res0(v); }
       var model, sig, Q = W.GYEOL_3D;
       try {
         if (!D.on || !D.pre3D || !canStream()) return res(false);
@@ -591,8 +714,9 @@
         sig = fullSig(model);
       } catch (e) { return res(false); }
       if (pre.sig === sig && pre.ready) return res(true);
+      try { if (adoptBg(sig) && pre.ready) return res(true); } catch (e) {}   // (2026-10-04f) 뒤에서 미리 만든 완성본(덜 됐으면 아래에서 이어서)
       try { if (takeStash(sig)) return res(true); } catch (e) {}      // (2026-10-04e) 3D 결과 화면에 가기 전에 보관해 둔 헤어
-      if (pre.sig !== sig) { dropPre(); pre.sig = sig; }
+      if (pre.sig !== sig) { if (!parkPreAsBg()) dropPre(); pre.sig = sig; }
       if (preTimer) { clearTimeout(preTimer); preTimer = null; }
       var job = pre.job, phaseA = !job && Q && typeof Q.warmStep === 'function';
       if (job) S.preResume++; else S.preCold++;
@@ -611,8 +735,8 @@
           job.step(slice);
           prog(0.45 + 0.55 * job.frac);
           if (!job.done) return setTimeout(tick, 0);
-          pre.job = null; pre.obj = job.obj; pre.ready = true; pre.entryMade = true;
-          S.preBuiltMs = job.ms; noteBuild(job, '진입(나눠서)');
+          pre.job = null; pre.obj = job.obj; pre.ready = true; pre.entryMade = true; pre.lite = !!job.lite;
+          S.preBuiltMs = job.ms; noteBuild(job, job.lite ? '조정 화면(가볍게)' : '진입(나눠서)');
           res(true);
         } catch (e) {
           console.warn(TAG + ' 진입 때 나눠서 만들기 중단 — 원래 방식으로 만듭니다', e);
@@ -663,8 +787,14 @@
       var self = this, args = arguments, gen = ++setupGen;
       if (!D.on) return origSetup.apply(self, args);
       if (!D.pre3D || !D.entryProgress || !neutral()) return runSetup(self, args, gen);
-      try { if (pre.ready && pre.sig === fullSig(neutral())) return runSetup(self, args, gen); } catch (e) { return runSetup(self, args, gen); }
-      try { stashForReturn(); } catch (e) {}                             // (2026-10-04e) 조정 화면의 헤어는 돌아올 때 쓰게 보관
+      try {
+        var sigNow = fullSig(neutral());
+        if (pre.sig !== sigNow) {
+          try { stashForReturn(); } catch (e1) {}                        // (2026-10-04e) 조정 화면의 헤어는 돌아올 때 쓰게 보관
+          try { adoptBg(sigNow); } catch (e2) {}                         // (2026-10-04f) 뒤에서 미리 만든 완성본
+        }
+        if (pre.ready && pre.sig === sigNow) return runSetup(self, args, gen);
+      } catch (e) { return runSetup(self, args, gen); }
       var shown = false, sub = null, lastPct = -1;
       try {
         if (typeof showAI === 'function') { showAI('3D 헤어 만드는 중…', '0%'); shown = true; sub = document.getElementById('aiOverlaySub'); }
@@ -706,9 +836,10 @@
           else { job = new Job(sig, model); S.preCold++; how = '지금 만듦'; }
           pre.job = null;
           job.step(Infinity);
-          pre.obj = job.obj; pre.ready = true; noteBuild(job, '진입(한 번에)');
+          pre.obj = job.obj; pre.ready = true; pre.lite = !!job.lite; noteBuild(job, job.lite ? '조정 화면(한 번에)' : '진입(한 번에)');
         }
-        freeFull(model);   // 3D 화면에 있는 동안은 전체 가닥 기억이 필요 없음(조정 화면으로 돌아오면 28번이 다시 채움)
+        if (isLite() && D.bgFull !== false) scheduleBg();   // 조정 화면: 가닥 기억을 그대로 두고, 조용해지면 완성본을 뒤에서 만듦
+        else freeFull(model);   // 3D 화면에 있는 동안은 전체 가닥 기억이 필요 없음(조정 화면으로 돌아오면 28번이 다시 채움)
         console.log(TAG + ' 3D 헤어 — ' + how + ' · ' + Math.round(now() - t0) + 'ms');
         return pre.obj;
       } catch (e) {
@@ -725,7 +856,7 @@
       if (!o || o.parent) return;
       try { o.geometry.dispose(); } catch (e) {}
       try { if (o.material && o.material.dispose) o.material.dispose(); } catch (e) {}
-      if (o.userData && o.userData._bufs && o !== pre.obj) { recycle(o.userData._bufs); o.userData._bufs = null; }
+      if (o.userData && o.userData._bufs && o !== pre.obj && o !== bg.obj && !(stash && o === stash.obj)) { recycle(o.userData._bufs); o.userData._bufs = null; }
     } catch (e2) {}
   };
 
@@ -749,6 +880,9 @@
       '벌 · 전체 가닥 기억 비움 ' + S.freedFull + '회 · 버퍼 재사용 ' + S.bufReuse + '회 · 3D 장면 반납 ' + S.released + '회 · 3D 미리 만들기: ' + preLine() + ' (받아 씀 ' + S.preHit + ' / 이어서 ' + S.preResume +
       ' / 진입 때 만듦 ' + S.preCold + ' / 원래 방식 ' + S.preFallback + ')' +
       (S.lastBuild ? ' · 마지막 헤어 만들기[' + S.lastBuild.how + '] ' + S.lastBuild.ms + 'ms = 가닥 계산 ' + S.lastBuild.calc + ' + 가닥 쓰기 ' + S.lastBuild.write + ' + 음영 ' + S.lastBuild.shade + ' (가닥 ' + S.lastBuild.strands + '개)' : '') +
+      ' · 완성본 뒤에서 만들기: ' + (D.bgFull === false ? '꺼짐' : bg.ready ? '준비됨' : bg.job ? '만드는 중 ' + Math.round(bg.job.frac * 100) + '%' : '대기') +
+      ' (다 만듦 ' + (S.bgBuilt || 0) + ' / 3D 진입 때 받아 씀 ' + (S.bgHit || 0) + ' / 이어서 ' + (S.bgResume || 0) + ')' +
+      (S.lastFullBuild ? ' · 마지막 완성본[' + S.lastFullBuild.how + '] ' + S.lastFullBuild.ms + 'ms = 가닥 계산 ' + S.lastFullBuild.calc + ' + 가닥 쓰기 ' + S.lastFullBuild.write + ' + 음영 ' + S.lastFullBuild.shade + ' (가닥 ' + S.lastFullBuild.strands + '개)' : '') +
       ' · 조정 화면 헤어 보관: ' + (stash ? '보관 중' : '없음') + ' (보관 ' + (S.stashKept || 0) + ' / 돌아와서 받아 씀 ' + (S.stashHit || 0) + ' / 상태가 달라 못 씀 ' + (S.stashMiss || 0) + ')' +
       (S.lastShow ? ' · 3D 장면 붙이기 ' + S.lastShow.setupMs + 'ms → 한꺼번에 보임 ' + S.lastShow.shownMs + 'ms' + (S.lastShow.guard ? ' ⚠ 6초 안전장치로 보임(얼굴 붙기를 못 기다림)' : '') : '')]);
   };
