@@ -57,7 +57,7 @@
     try {
       if (item) {
         var fp = null; try { fp = hairOutfitFingerprint(); } catch (e) {}
-        state.aiOutfitRecommendation = { item: item, reason: 'picked manually', alts: [], fp: fp, manual: true };
+        state.aiOutfitRecommendation = { item: item, reason: '직접 고름', alts: [], fp: fp, manual: true };
       } else state.aiOutfitRecommendation = null;                // 자동 추천으로
     } catch (e) { console.warn(TAG + ' 의상 지정 실패', e); return; }
     var m = m3(), rot = m ? m.headGroup.rotation.y : 0, keep = { zoom: MODEL3D_VIEW.zoom, panX: MODEL3D_VIEW.panX, panY: MODEL3D_VIEW.panY };
@@ -83,8 +83,6 @@
     b.addEventListener('click', function (e) { e.stopPropagation(); fn(); });
     return b;
   }
-  var EN = { 'ot-charcoal-suit': 'Charcoal suit', 'ot-slate-casual': 'Slate casual shirt', 'ot-olive-longsleeve': 'Olive long sleeve', 'ot-burgundy-shirt': 'Burgundy shirt' };
-  function nameOf(c) { return EN[c.id] || c.nameEn || c.name; }
   function label(t) {
     var s = document.createElement('span');
     s.textContent = t; s.style.cssText = 'color:#f3eadf;background:rgba(20,16,12,.72);padding:7px 8px;border-radius:6px;font:600 12px system-ui,sans-serif;';
@@ -105,11 +103,11 @@
     bar.textContent = '';
     var r1 = row(), r2 = row(), cur = curId(), man = isManual();
     r1.style.pointerEvents = r2.style.pointerEvents = 'auto';
-    r1.appendChild(label(busy ? 'Dressing…' : 'Outfit'));
-    r1.appendChild(chip('Auto', !man, function () { F.pick(null); }));
-    catalog().forEach(function (c) { r1.appendChild(chip(nameOf(c), man && cur === c.id, function () { F.pick(c.id); }, c.colorHex)); });
-    r2.appendChild(label('View'));
-    [['full', 'Full body'], ['upper', 'Upper body'], ['head', 'Head']].forEach(function (v) { r2.appendChild(chip(v[1], F.view === v[0], function () { F.setView(v[0]); })); });
+    r1.appendChild(label(busy ? '의상 입히는 중…' : '의상'));
+    r1.appendChild(chip('자동', !man, function () { F.pick(null); }));
+    catalog().forEach(function (c) { r1.appendChild(chip(c.name, man && cur === c.id, function () { F.pick(c.id); }, c.colorHex)); });
+    r2.appendChild(label('보기'));
+    [['full', '전신'], ['upper', '상반신'], ['head', '머리']].forEach(function (v) { r2.appendChild(chip(v[1], F.view === v[0], function () { F.setView(v[0]); })); });
     bar.appendChild(r2); bar.appendChild(r1);
   }
   F.render = render;

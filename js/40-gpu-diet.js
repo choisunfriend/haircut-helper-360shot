@@ -169,7 +169,7 @@
     W.runStyleAnalysisPipeline = function () {
       var self = this, args = arguments;
       if (!released && !reloadP) return origPipe.apply(self, args);
-      try { if (typeof showAI === 'function') showAI('Loading models…', 'Preparing the analysis models again'); } catch (e) {}
+      try { if (typeof showAI === 'function') showAI('모델 로딩 중…', '분석 모델을 다시 준비하고 있어요'); } catch (e) {}
       return ensureModels('분석').then(function () { return origPipe.apply(self, args); });
     };
   }
