@@ -30,12 +30,12 @@
  *    이 둘을 하나씩 끄고 모델을 다시 만들어, 가시·꺾임·길이가 어떻게 달라지는지 표로 찍습니다.
  *    끝나면 원래 설정으로 되돌려 다시 만듭니다. (마네킹은 꺼집니다)
  *
- * 끄기: ORIG_ASIS.on=false 후 ORIG_ASIS.refresh() · 버튼 숨기기 ORIG_ASIS.button=false (새로고침)
+ * 끄기: ORIG_ASIS.on=false 후 ORIG_ASIS.refresh() · 버튼은 기본 숨김(2026-10-04) — 다시 보이려면 ORIG_ASIS.button=true (새로고침)
  * ========================================================================== */
 (function () {
   'use strict';
   var W = window, TAG = '[원본 그대로]';
-  var O = W.ORIG_ASIS = Object.assign({ on: false, button: true, spikeR: 1.25, spikeCos: 0.5, sample: 1500 }, W.ORIG_ASIS || {});
+  var O = W.ORIG_ASIS = Object.assign({ on: false, button: false /* 2026-10-04: 버튼 없앰(사용자 요청) — 콘솔 ORIG_ASIS.toggle()은 그대로 */, spikeR: 1.25, spikeCos: 0.5, sample: 1500 }, W.ORIG_ASIS || {});
 
   var innerAdj = W.adjustStrandGeom;
   if (typeof innerAdj !== 'function') { console.warn(TAG + ' adjustStrandGeom이 없어 건너뜀'); return; }

@@ -24,8 +24,9 @@
  *      그쪽으로 머리가 없으면(앞 헤어라인 아래 = 이마) 반대로 기릅니다 → 세운 앞머리.
  *   ⑥ 두피를 벗어나면(목덜미 아래·얼굴 쪽) 자유 낙하 구간 — 결을 따르되 중력을 섞고 두상 안으로 못 들어가게.
  *
- * 화면: 조정 화면 [다시 기르기] 버튼. 켜면 마네킹은 꺼지고 [원본 3D 그대로]가 켜집니다
- *       (조정 엔진의 기본 컬·커트가 섞이지 않은 결과를 먼저 보기 위해서).
+ * 화면(2026-10-04 바뀜): 버튼 없음 — 마네킹 OFF면 자동으로 다시 기르고 치수를 재서 슬라이더에 넣습니다(아래 "버튼 없이 자동" 참고).
+ *       (예전: 조정 화면 [다시 기르기] 버튼. 켜면 마네킹은 꺼지고 [원본 3D 그대로]가 켜집니다
+ *       (조정 엔진의 기본 컬·커트가 섞이지 않은 결과를 먼저 보기 위해서).)
  *       진단 줄 [다시 기르기]에 뿌리 분포·길이·꺾임·추정 비율·멈춘 이유가 찍힙니다.
  *
  * 한계(v1): 측면 사진이 28~51°라 정옆·뒤의 두께는 추정이 섞입니다. 속머리(겉에서 안 보이는 층)는 겉 결을 따릅니다.
@@ -523,39 +524,187 @@
       }
       G.model = model; G.src = photo;
       console.log(G.lines().join('\n'));
+      try { if (G.applyBaseline) G.applyBaseline(); } catch (e) { console.warn(TAG + ' 기준 값 넣기 실패', e); }
       redraw();
       if (cb) cb(true);
     })();
   };
 
-  var btn = null;
-  function syncBtn() { if (btn) { btn.textContent = '다시 기르기 ' + (G.on ? 'ON' : 'OFF'); btn.classList.toggle('on', !!G.on); } }
-  G.refresh = function () { syncBtn(); if (G.on && !G.model) G.build(); else redraw(); };
-  G.toggle = function () {
-    G.on = !G.on;
-    if (G.on) {
-      try { if (typeof MANNEQUIN !== 'undefined' && MANNEQUIN.on && typeof toggleMannequin === 'function') toggleMannequin(); } catch (e) {}
-      try { if (W.ORIG_ASIS && !W.ORIG_ASIS.on) W.ORIG_ASIS.toggle(); } catch (e) {}      // 조정 엔진이 안 섞인 결과부터 봄
-      G.failedFor = null;
+  /* ────────────────────────────────────────────────────────────────────────
+   * (2026-10-04) 버튼 없이 자동 — 마네킹 OFF = 다시 기른 원본 머리(+치수 재기) · 마네킹 ON = 마네킹 모드
+   *   · [다시 기르기] [원본 3D 그대로] [스타일 숫자 재기] 버튼은 없앴습니다(사용자 요청).
+   *   · 마네킹이 꺼져 있으면 항상 다시 기른 머리를 보여 주고, 다 기르면 바로 치수를 재서
+   *     슬라이더에 넣습니다(뿌리 볼륨·넘김 = 잰 값 · 길이 = 지금 길이가 기준 · 컬 0 = 지금 결 그대로).
+   *   · 그 상태가 "기준"입니다. 기준에서는 가닥을 손대지 않고(사진 결 그대로), 슬라이더를 움직인 만큼만
+   *     가닥에 겁니다(길이 비율 · 컬/웨이브 · 볼륨 · 넘김 · 가르마 · 흐름 · 정돈) — 바로 조정할 수 있게.
+   *   · 마네킹 ON으로 가면 마네킹 때 쓰던 슬라이더 값(과 걸려 있던 스타일)을 되돌립니다.
+   * ────────────────────────────────────────────────────────────────────── */
+  G.base = null;            // 기준(잰 값): { sections:{sec:{length,curl}}, sty:{sweep,volume}, src: 사진 모델 }
+  G.mqSnap = null;          // 마네킹 모드에서 쓰던 값(되돌리기용)
+  function mqOn() { try { return typeof MANNEQUIN !== 'undefined' && !!MANNEQUIN.on; } catch (e) { return false; } }
+  function secOrder() { return (typeof SECTION_ORDER !== 'undefined') ? SECTION_ORDER : ['crown', 'front', 'temple', 'side', 'occipital', 'nape']; }
+  function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+  function setTag(t) { try { var el = document.getElementById('adjustStyleTag'); if (el) el.textContent = t; } catch (e) {} }
+  function rebuildPanel() {
+    try { if (typeof buildGyPanel === 'function') buildGyPanel(); else if (typeof buildGyControls === 'function') buildGyControls(); } catch (e) { console.warn(TAG + ' 조정 패널 다시 그리기 실패', e); }
+    try { if (typeof syncSliderUI === 'function') syncSliderUI(); } catch (e) {}
+  }
+  function summary(r) {     // 미리보기 꼬리표에 넣는 한 줄
+    try {
+      var sp = r.spec, top, side, back;
+      if (r.isLong) return '원본 머리 · 치수 잼 — 긴 머리 · 볼륨 ' + sp.styling.volume + ' · 넘김 ' + (sp.styling.sweep > 0 ? '+' : '') + sp.styling.sweep;
+      top = sp.lenCm.crown != null ? sp.lenCm.crown : sp.lenCm.front; side = sp.lenCm.side != null ? sp.lenCm.side : sp.lenCm.temple;
+      back = sp.lenCm.occipital != null ? sp.lenCm.occipital : sp.lenCm.nape;
+      return '원본 머리 · 치수 잼 — 윗머리 ' + (top != null ? top : '?') + 'cm · 옆 ' + (side != null ? side : '?') + 'cm · 뒤 ' + (back != null ? back : '?') + 'cm · 볼륨 ' + sp.styling.volume;
+    } catch (e) { return '원본 머리 · 치수 잼'; }
+  }
+  /* 다시 기른 머리에서 잰 값을 슬라이더에 넣고 그 상태를 기준으로 삼음 */
+  G.applyBaseline = function () {
+    if (!G.on || mqOn()) return false;
+    var photo = null; try { photo = state._hair3Dneutral; } catch (e) {}
+    if (!photo) return false;
+    if (G.base && G.base.src === photo) return true;                 // 이 머리에는 이미 넣었음(사용자가 움직인 값을 덮지 않음)
+    var r = null; try { r = G.measure(); } catch (e) { console.warn(TAG + ' 치수 재기 실패', e); }
+    var sty = null; try { sty = neutralStyling(); } catch (e) { sty = { sweep: 0, volume: 50, flow: 0, part: 0, partAmt: 0, finish: 50, sleek: 0 }; }
+    if (r && r.spec && r.spec.styling) { sty.sweep = r.spec.styling.sweep; sty.volume = r.spec.styling.volume; }
+    var base = { sections: {}, sty: { sweep: sty.sweep || 0, volume: typeof sty.volume === 'number' ? sty.volume : 50 }, src: photo, measured: r };
+    try {
+      secOrder().forEach(function (sec) {
+        var d = {}; try { d = clone(SECTIONS[sec].defaults) || {}; } catch (e) {}
+        d.curl = 0;                                                  // 지금 결이 기준 — 컬은 "더한 만큼"
+        state.sections[sec] = d;
+        base.sections[sec] = { length: d.length, curl: 0 };
+      });
+      state._globalCurl = 0;
+      var sbv = {}; (typeof ANGLES !== 'undefined' ? ANGLES : ['front', 'left', 'right', 'back']).forEach(function (a) { sbv[a] = Object.assign({}, sty); });
+      state.stylingByView = sbv;
+      try { if (typeof bindStylingToCurrentView === 'function') bindStylingToCurrentView(); } catch (e) {}
+      try { if (state.fade) state.fade.enabled = false; } catch (e) {}      // 페이드는 이미 머리에 들어 있음
+      try { state.specAppliedId = null; state._specUndo = null; if (typeof BRAID !== 'undefined') BRAID.on = false; } catch (e) {}
+    } catch (e) { console.warn(TAG + ' 기준 값 넣기 실패', e); }
+    G.base = base;
+    rebuildPanel();
+    setTag(r ? summary(r) : '원본 머리');
+    if (r) console.log(G.measureLines(r).join('\n'));
+    redraw();
+    return true;
+  };
+  function atBase(sec, cur, sty) {
+    var b = G.base; if (!b) return true;
+    var bs = b.sections[sec] || {};
+    return (cur.length === bs.length || typeof cur.length !== 'number') && !((cur.curl || 0) > (bs.curl || 0)) &&
+      (sty.sweep || 0) === b.sty.sweep && (typeof sty.volume !== 'number' || sty.volume === b.sty.volume) &&
+      !(sty.part) && !(sty.flow) && !(sty.sleek);
+  }
+  /* 다시 기른 가닥: 기준에서 움직인 만큼만 */
+  function adjustRegrown(s, lenOverride, styOverride) {
+    var b = G.base; if (!b || b.src !== state._hair3Dneutral) return s.pts;
+    var cur = (state.sections && state.sections[s.sec]) || {};
+    var sty = (styOverride !== undefined ? styOverride : uniformStyling()) || stylingForRoot(s.pts[0]) || {};
+    if (typeof lenOverride === 'number') cur = Object.assign({}, cur, { length: lenOverride });
+    if (atBase(s.sec, cur, sty)) return s.pts;
+    var bs = b.sections[s.sec] || {}, g = s.pts;
+    var r = sectionLengthRatio(s.sec, cur.length) / (sectionLengthRatio(s.sec, bs.length) || 1);
+    if (Math.abs(r - 1) > 1e-6) g = lengthStrand3D(g, r);
+    var curl = Math.max(0, (cur.curl || 0) - (bs.curl || 0));
+    var sweep = Math.max(-100, Math.min(100, (sty.sweep || 0) - b.sty.sweep));
+    var vol = Math.max(0, Math.min(100, 50 + ((typeof sty.volume === 'number' ? sty.volume : 50) - b.sty.volume)));
+    var part = sty.part || 0, spine = false;
+    try { spine = typeof STYLE_ORDER !== 'undefined' && !!STYLE_ORDER.spineFirst; } catch (e) {}
+    if (spine) { g = partStrand3D(g, part, curl, sty.partAmt); g = sweepStrand3D(g, sweep * sweepCurlScale(curl), curl, part, sty.partAmt); }
+    g = curlStrand3D(g, curl, (typeof cur.wave === 'number' ? cur.wave : 50) / 100, typeof cur.curlDir === 'number' ? cur.curlDir : 0);
+    if (curl > 0) g = gravityDroop3D(g, curl);
+    if (!spine) { g = partStrand3D(g, part, curl, sty.partAmt); g = sweepStrand3D(g, sweep, curl, part, sty.partAmt); }
+    g = volumeStrand3D(g, vol, s.sec);
+    g = flowCurlStrand3D(g, sty.flow || 0);
+    g = sleekStrand3D(g, typeof sty.sleek === 'number' ? sty.sleek : 0);
+    return g;
+  }
+  var prevAdj = W.adjustStrandGeom;
+  if (typeof prevAdj === 'function') W.adjustStrandGeom = function (s, lenOverride, styOverride) {
+    if (G.on && s && !s.mannequin && s.pts) {
+      if (!s.regrown) return s.pts;                                  // 못 길렀을 때 — 사진 가닥을 손대지 않고 그대로
+      try { return adjustRegrown(s, lenOverride, styOverride); } catch (e) { G.adjErr = String(e && e.message || e); return s.pts; }
     }
-    console.log(TAG + ' ' + (G.on ? '켬' : '끔 — 사진 가닥으로 되돌림'));
-    G.refresh();
+    return prevAdj.apply(this, arguments);
+  };
+
+  G.refresh = function () {
+    if (G.on && !(G.model && G.src === state._hair3Dneutral)) G.build();
+    else { if (G.on) G.applyBaseline(); redraw(); }
+  };
+  /* 마네킹 상태에 맞춤 — 마네킹 OFF면 다시 기르기 켬 */
+  G.sync = function () {
+    var want = !mqOn();
+    if (want === G.on) { if (want) G.refresh(); return; }
+    if (want) {
+      G.on = true; G.failedFor = null;
+      try { if (W.ORIG_ASIS && W.ORIG_ASIS.on) W.ORIG_ASIS.on = false; } catch (e) {}
+      setTag('원본 머리');
+      console.log(TAG + ' 마네킹 OFF — 다시 기른 원본 머리');
+      G.refresh();
+    } else { G.on = false; }
+  };
+  try { var mqb = document.getElementById('mannequinBtn'); if (mqb) mqb.title = 'ON: 마네킹 모드(컬·스타일링을 지운 상태에서 시작) · OFF: 사진에서 다시 기른 원본 머리(치수 잼)'; } catch (e) {}
+  G.toggle = function () { try { if (typeof toggleMannequin === 'function') toggleMannequin(); } catch (e) {} };   // 예전 콘솔 명령 호환
+
+  // 마네킹을 끌 때: 마네킹에서 쓰던 값을 기억 · 켤 때: 되돌림
+  var origToggleMq = W.toggleMannequin;
+  if (typeof origToggleMq === 'function') W.toggleMannequin = function () {
+    var wasOn = mqOn(), r;
+    if (wasOn) {
+      try { G.mqSnap = { sections: clone(state.sections), stylingByView: clone(state.stylingByView), fade: clone(state.fade), globalCurl: state._globalCurl, specId: state.specAppliedId || null }; } catch (e) { G.mqSnap = null; }
+      G.base = null;                                                 // 다시 들어올 때 잰 값을 새로 넣음
+    }
+    r = origToggleMq.apply(this, arguments);
+    if (wasOn && !mqOn()) G.sync();
+    return r;
   };
   var origMq = W.mannequinReset;
   if (typeof origMq === 'function') W.mannequinReset = function () {
-    if (G.on) { G.on = false; syncBtn(); }
-    return origMq.apply(this, arguments);
-  };
-  if (G.button) try {
-    var bar = document.querySelector('#screen-adjust .mode-bar');
-    if (bar) {
-      btn = document.createElement('button');
-      btn.id = 'regrowBtn'; btn.type = 'button';
-      btn.title = '두피 전체에 뿌리를 심고, 사진의 결을 직접 읽어 가닥을 다시 기릅니다';
-      btn.addEventListener('click', function () { G.toggle(); });
-      bar.appendChild(btn); syncBtn();
+    var was = G.on, snap = G.mqSnap, r, inAdj = false;
+    try { inAdj = currentScreen === 'adjust' && !state.pendingSpecId; } catch (e) {}
+    if (!inAdj) snap = null;                                         // 스타일 화면에서 새 스타일을 고른 경우 — 예전 값을 되돌리지 않음
+    G.on = false;
+    if (was && snap) {
+      try {
+        state.sections = snap.sections;
+        if (snap.fade && state.fade) Object.assign(state.fade, snap.fade);
+        if (typeof snap.globalCurl === 'number') state._globalCurl = snap.globalCurl;
+      } catch (e) {}
     }
-  } catch (e) {}
+    r = origMq.apply(this, arguments);
+    if (was) {
+      G.mqSnap = null; G.base = null;
+      try { setTag((state.selectedStyle && state.selectedStyle.name) || '스타일 미선택'); } catch (e) {}
+      rebuildPanel();
+      if (snap && snap.specId && typeof applyStyleSpecAndRender === 'function') {
+        setTimeout(function () { try { if (mqOn() && !state.specAppliedId) applyStyleSpecAndRender(snap.specId); } catch (e) { console.warn(TAG + ' 스타일 다시 걸기 실패', e); } }, 60);
+      }
+    }
+    return r;
+  };
+  // 조정 화면에 들어올 때 — 마네킹이 꺼져 있으면(스타일을 안 골랐거나 껐으면) 바로 다시 기른 머리
+  var origSetupAdj = W.setupAdjustScreen;
+  if (typeof origSetupAdj === 'function') W.setupAdjustScreen = function () {
+    var pending = null; try { pending = state.pendingSpecId; } catch (e) {}
+    var r = origSetupAdj.apply(this, arguments);
+    if (!pending) setTimeout(function () { try { if (currentScreen === 'adjust') G.sync(); } catch (e) {} }, 0);
+    return r;
+  };
+  // 이 모드에서 [현재 모델을 스타일로 등록] = 잰 숫자로 등록(슬라이더를 안 움직였을 때)
+  var origReg = W.registerCurrentAsStyle;
+  if (typeof origReg === 'function') W.registerCurrentAsStyle = function () {
+    if (G.on && !mqOn() && G.base && G.model && G.src === state._hair3Dneutral) {
+      var moved = false;
+      try {
+        var sty = uniformStyling() || state.stylingByView[state.currentViewAngle] || {};
+        secOrder().forEach(function (sec) { if (!atBase(sec, state.sections[sec] || {}, sty)) moved = true; });
+      } catch (e) {}
+      if (!moved) return G.register();
+    }
+    return origReg.apply(this, arguments);
+  };
 
   /* ────────────────────────────────────────────────────────────────────────
    * 스타일 숫자로 재기
@@ -629,7 +778,7 @@
   };
   G.measureLines = function (r) {
     r = r || G.measure();
-    if (!r) return ['[스타일 숫자] 다시 기른 모델이 없습니다 — [다시 기르기]를 먼저 켜세요'];
+    if (!r) return ['[스타일 숫자] 다시 기른 모델이 없습니다 — 마네킹을 끄면 원본 머리를 다시 기릅니다'];
     var sp = r.spec, L = ['[스타일 숫자] 다시 기른 머리에서 잰 값 (' + (r.isLong ? '긴 머리 — 끝 높이로 저장' : '짧은 머리 — 길이 cm로 저장') + ')'];
     if (r.isLong) {
       L.push('  끝 높이(정수리에서 두상 높이의 몇 배 아래 · 1.00 ≈ 턱): ' + r.order.filter(function (k) { return sp.tipAt[k] != null; }).map(function (k) { return k + ' ' + sp.tipAt[k].toFixed(2); }).join(' · '));
@@ -647,8 +796,8 @@
   };
   G.register = function () {
     var r = G.measure();
-    if (!r) { try { showToast('먼저 [다시 기르기]를 켜세요'); } catch (e) {} return null; }
-    var name = null; try { name = prompt('이 스타일 이름을 입력하세요 (원본 머리에서 잰 숫자로 등록)', ''); } catch (e) {}
+    if (!r) { try { showToast('원본 머리를 아직 못 쟀어요 — 마네킹을 끄고 잠시 기다려 주세요'); } catch (e) {} return null; }
+    var name = null; try { name = prompt((typeof tUI === 'function' ? tUI : function (x) { return x; })('이 스타일 이름을 입력하세요 (원본 머리에서 잰 숫자로 등록)'), ''); } catch (e) {}
     if (!name || !name.trim()) return null;
     name = name.trim();
     var id = 'custom-' + Date.now(), sections = {}, sbv = {};
@@ -662,7 +811,7 @@
       STYLES.push(stl);
       if (typeof saveCustomStylesToStorage === 'function') saveCustomStylesToStorage();
       if (typeof buildStyleGrid === 'function') buildStyleGrid();
-      if (typeof showToast === 'function') showToast('"' + name + '" 스타일로 등록했어요');
+      if (typeof showToast === 'function') showToast('스타일로 등록했어요: ' + name);
       console.log(TAG + ' 스타일 등록 "' + name + '"\n' + G.measureLines(r).join('\n'));
     } catch (e) { console.warn(TAG + ' 스타일 등록 실패', e); return null; }
     return stl;
@@ -694,17 +843,6 @@
       mbox.style.display = 'block';
     } catch (e) {}
   };
-  if (G.button) try {
-    var bar3 = document.querySelector('#screen-adjust .mode-bar');
-    if (bar3) {
-      var mb = document.createElement('button');
-      mb.id = 'regrowMeasureBtn'; mb.type = 'button'; mb.textContent = '스타일 숫자 재기';
-      mb.title = '다시 기른 머리에서 길이·페이드·볼륨·넘김을 재서 스타일로 등록합니다';
-      mb.addEventListener('click', function () { G.showMeasure(); });
-      bar3.appendChild(mb);
-    }
-  } catch (e) {}
-
   G.lines = function () {
     var s = G.stats, L = ['[다시 기르기] ' + (G.on ? '켜짐' : '꺼짐') + (G.building ? ' · 만드는 중' : '') + (G.model && G.src === state._hair3Dneutral ? ' · 모델 있음' : ' · 모델 없음') + (G.lastErr ? ' · ⚠ ' + G.lastErr : '')];
     if (!s) return L;
@@ -721,8 +859,10 @@
   if (typeof ppl === 'function') W.perfPanelLines = function () {
     var L = ppl.apply(this, arguments) || [];
     try { L = L.concat(G.lines()); } catch (e) {}
+    try { if (G.on && G.model) L = L.concat(G.measureLines()); } catch (e) {}
+    if (G.adjErr) L.push('[다시 기르기] ⚠ 조정 실패: ' + G.adjErr);
     return L;
   };
 
-  console.log(TAG + ' 설치 — 조정 화면의 [다시 기르기] 버튼. 콘솔: REGROW.toggle() · REGROW.lines().join("\\n")');
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")');
 })();

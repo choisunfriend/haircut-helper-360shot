@@ -220,6 +220,7 @@
 
   function tick() {
     raf = null; if (!running) return;
+    if (!Q.cam.ok) { drawRing(); raf = requestAnimationFrame(tick); return; }      // 카메라가 아직 안 들어옴 — 안내는 카메라 쪽이 씀
     var t = now();
     if (sensorOk && lastEvt) {
       var h = headingOf(lastEvt);
@@ -273,46 +274,164 @@
     close();
     Q.applySet(set).then(function (ok) { if (ok) Q.saveSet(set).then(refreshRow, refreshRow); });
   }
-  function stopCam() { try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} stream = null; }
+  function stopCam() { try { if (stream) stream.getTracks().forEach(function (t) { t.onended = null; t.stop(); }); } catch (e) {} stream = null; }
+
+  /* ── 카메라 열기 (2026-10-04 고침: "360 촬영을 켜면 카메라가 안 들어옴") ─────────────────
+   * 예전에는 앱 카메라를 끄자마자 딱 한 번 getUserMedia를 부르고, 실패하거나 영상이 안 나와도 그대로였습니다.
+   *   · 앞 카메라를 끈 직후에는 기기가 아직 카메라를 놓지 않아 실패하는 일이 흔합니다(NotReadableError) → 잠깐 기다렸다 열고, 실패하면 다시 시도.
+   *   · 해상도·후면 조건을 못 맞추는 기기 → 조건을 낮춰 가며 다시(1080p 후면 → 후면 → 아무 카메라).
+   *   · 스트림은 받았는데 영상이 안 도는 경우(자동 재생 막힘) → play()를 직접 부르고, 그래도 안 되면 "화면을 눌러 주세요".
+   *   · 앱의 앞 카메라가 뒤늦게 켜져 후면을 밀어내는 경우(켜지는 도중에 360을 누름) → 덮개가 떠 있는 동안 앱 카메라를 막음.
+   *   · 그래도 안 되면 이유(권한/카메라 없음/다른 앱이 사용 중/https 아님)를 화면에 쓰고 [카메라 다시 열기] 버튼을 보여 줍니다.
+   * ───────────────────────────────────────────────────────────────────────────────────── */
+  var READY_MSG = '손님 정면에 서서 [시작]을 누르세요. 폰은 세워서 머리를 향하게.';
+  var CAM_TRIES = [
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: true, audio: false }
+  ];
+  var camSeq = 0, camWatch = null, camGuard = null, btnCam = null, tapEl = null;
+  Q.cam = { opens: 0, retries: 0, lastErr: null, ok: false };
+  function showRetry(on) { if (btnCam) btnCam.style.display = on ? '' : 'none'; }
+  function camFail(text, e) {
+    Q.cam.ok = false; Q.cam.lastErr = e ? (e.name || '') + ': ' + (e.message || e) : text;
+    setInfo(text); showRetry(true);
+    console.warn(TAG + ' 카메라 실패 — ' + Q.cam.lastErr);
+  }
+  function releaseAppCam() {        // 앱(촬영 화면)의 앞 카메라를 끔 — 폰은 두 카메라를 동시에 못 여는 경우가 많음
+    try {
+      if (typeof cameraStream !== 'undefined' && cameraStream) {
+        cameraStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+        cameraStream = null; try { video.srcObject = null; } catch (e) {}
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  function playVid() {
+    if (!vid) return;
+    var p = null; try { p = vid.play(); } catch (e) {}
+    if (p && typeof p.catch === 'function') p.catch(function (e) {
+      if (!ov || !vid || !vid.paused || (e && e.name === 'AbortError')) return;
+      // 자동 재생이 막힘 — 한 번 눌러서 켬
+      if (!tapEl) {
+        tapEl = el('button', 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:14px 18px;border-radius:14px;border:1px solid #C98A4B;background:rgba(20,16,12,.85);color:#f3eadf;font:600 15px system-ui,sans-serif;', '화면을 눌러 카메라 켜기');
+        tapEl.type = 'button';
+        tapEl.addEventListener('click', function () { try { vid.play(); } catch (x) {} if (tapEl && tapEl.parentNode) tapEl.parentNode.removeChild(tapEl); tapEl = null; });
+        if (vid.parentNode) vid.parentNode.appendChild(tapEl);
+      }
+    });
+  }
+  function camReady() {
+    if (!vid || !(vid.videoWidth > 0)) return false;
+    if (!Q.cam.ok) { Q.cam.ok = true; Q.cam.lastErr = null; showRetry(false); if (!running) setInfo(READY_MSG); }
+    return true;
+  }
+  function openCam(attempt) {
+    if (!ov) return;
+    attempt = attempt || 0;
+    var my = ++camSeq, md = navigator.mediaDevices;
+    if (camWatch) { clearTimeout(camWatch); camWatch = null; }
+    showRetry(false);
+    if (!md || !md.getUserMedia) {
+      var insecure = false; try { insecure = W.isSecureContext === false; } catch (e) {}
+      camFail(insecure ? '카메라는 https 주소에서만 열 수 있습니다 — 주소가 https://로 시작하는지 확인해 주세요' : '이 브라우저에서는 카메라를 열 수 없습니다');
+      return;
+    }
+    Q.cam.opens++; if (attempt) Q.cam.retries++;
+    setInfo('카메라를 여는 중…');
+    md.getUserMedia(CAM_TRIES[Math.min(attempt, CAM_TRIES.length - 1)]).then(function (s) {
+      if (!ov || my !== camSeq) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+      stopCam();
+      stream = s;
+      try { s.getVideoTracks().forEach(function (t) { t.onended = function () { if (ov && stream === s) camFail('카메라가 끊겼습니다 — [카메라 다시 열기]를 눌러 주세요'); }; }); } catch (e) {}
+      try { vid.srcObject = s; } catch (e) { try { vid.src = URL.createObjectURL(s); } catch (x) {} }
+      vid.onloadedmetadata = function () { playVid(); camReady(); };
+      vid.onplaying = camReady;
+      playVid();
+      // 스트림은 받았는데 영상이 안 나오는 경우 — 다시 열어 봄
+      var waited = 0;
+      (function watch() {
+        camWatch = null;
+        if (!ov || my !== camSeq) return;
+        if (camReady()) return;
+        waited += 500;
+        if (waited < 3000) { camWatch = setTimeout(watch, 500); return; }
+        if (attempt < 3) { stopCam(); openCam(attempt + 1); }
+        else camFail('카메라 영상이 나오지 않습니다 — 다른 앱이 카메라를 쓰고 있지 않은지 확인하고 [카메라 다시 열기]를 눌러 주세요');
+      })();
+    }, function (e) {
+      if (!ov || my !== camSeq) return;
+      var n = (e && e.name) || '';
+      if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') {
+        camFail('카메라 권한이 꺼져 있습니다 — 브라우저 주소창의 카메라 권한을 허용한 뒤 [카메라 다시 열기]를 눌러 주세요', e);
+      } else if (n === 'NotFoundError' || n === 'DevicesNotFoundError' || n === 'OverconstrainedError' || n === 'ConstraintNotSatisfiedError') {
+        if (attempt < CAM_TRIES.length - 1) openCam(attempt + 1);
+        else camFail('쓸 수 있는 카메라를 찾지 못했습니다', e);
+      } else if (attempt < 4) {
+        // NotReadableError·AbortError 등 — 앞 카메라가 아직 안 놓였거나 다른 곳에서 쓰는 중. 조금 기다렸다 다시.
+        releaseAppCam();
+        setTimeout(function () { if (ov && my === camSeq) openCam(attempt + 1); }, 350 + 350 * attempt);
+      } else camFail('카메라를 열 수 없습니다 — 다른 앱이나 탭이 카메라를 쓰고 있지 않은지 확인하고 [카메라 다시 열기]를 눌러 주세요', e);
+    });
+  }
+  // 덮개가 떠 있는 동안에는 앱의 앞 카메라가 켜지지 않게(켜지는 도중에 360을 누른 경우 포함)
+  var origInitCam = W.initCamera;
+  if (typeof origInitCam === 'function') W.initCamera = function () {
+    if (ov) return Promise.resolve();
+    return origInitCam.apply(this, arguments);
+  };
   function close() {
     running = false; if (raf) { cancelAnimationFrame(raf); raf = null; }
     W.removeEventListener('deviceorientation', onOri, true);
+    camSeq++; if (camWatch) { clearTimeout(camWatch); camWatch = null; }
+    if (camGuard) { clearInterval(camGuard); camGuard = null; }
     stopCam();
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    ov = null;
-    try { if (typeof initCamera === 'function' && typeof currentScreen !== 'undefined' && currentScreen === 'capture') Promise.resolve(initCamera()).then(function () { try { updateAngleUI(); } catch (e) {} }); } catch (e) {}
+    ov = null; vid = null; btnCam = null; tapEl = null; Q.cam.ok = false;
+    // 후면 카메라가 놓일 틈을 주고 앱의 앞 카메라를 다시 켬(바로 켜면 실패하는 기기가 있음) — 실패하면 한 번 더
+    var back = function (again) {
+      try {
+        if (ov || typeof initCamera !== 'function' || typeof currentScreen === 'undefined' || currentScreen !== 'capture') return;
+        if (typeof cameraStream !== 'undefined' && cameraStream) return;
+        Promise.resolve(initCamera()).then(function () {
+          try { updateAngleUI(); } catch (e) {}
+          try { if (again && !ov && !cameraStream) setTimeout(function () { back(false); }, 900); } catch (e) {}
+        });
+      } catch (e) {}
+    };
+    setTimeout(function () { back(true); }, 300);
   }
   Q.open = function () {
     if (ov) return;
     // 앱의 전면 카메라를 끄고 후면 카메라를 엶(폰은 두 카메라를 동시에 못 여는 경우가 많음)
-    try { if (typeof cameraStream !== 'undefined' && cameraStream) { cameraStream.getTracks().forEach(function (t) { t.stop(); }); cameraStream = null; video.srcObject = null; } } catch (e) {}
+    var hadAppCam = releaseAppCam();
     ov = el('div', 'position:fixed;inset:0;z-index:9998;background:#000;display:flex;flex-direction:column;');
     var stage = el('div', 'position:relative;flex:1;overflow:hidden;');
     vid = el('video', 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;');
-    vid.autoplay = true; vid.muted = true; vid.setAttribute('playsinline', '');
+    vid.autoplay = true; vid.muted = true; vid.defaultMuted = true; vid.playsInline = true;
+    vid.setAttribute('autoplay', ''); vid.setAttribute('muted', ''); vid.setAttribute('playsinline', ''); vid.setAttribute('webkit-playsinline', '');   // 아이폰은 속성으로 있어야 화면 안에서 재생
     var oval = el('div', 'position:absolute;left:50%;top:40%;width:56%;aspect-ratio:3/4;transform:translate(-50%,-50%);border:2px dashed rgba(232,195,158,.75);border-radius:50%;pointer-events:none;');
     var ringWrap = el('div', 'position:absolute;right:10px;top:10px;width:104px;height:104px;background:rgba(0,0,0,.45);border-radius:50%;pointer-events:none;');
     ringWrap.innerHTML = '<svg viewBox="0 0 100 100" width="104" height="104"></svg>'; ring = ringWrap.firstChild;
     info = el('div', 'position:absolute;left:10px;right:124px;top:10px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.55);color:#f3eadf;font:600 13px/1.4 system-ui,sans-serif;',
-      '손님 정면에 서서 [시작]을 누르세요. 폰은 세워서 머리를 향하게.');
+      '카메라를 여는 중…');
     var tip = el('div', 'position:absolute;left:10px;right:10px;bottom:10px;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.45);color:#cfc5b8;font:12px/1.4 system-ui,sans-serif;',
       '15~20초에 걸쳐 한 바퀴 · 손님은 고개와 머리카락을 움직이지 않습니다 · 출발점으로 돌아오면 [완료]');
     stage.appendChild(vid); stage.appendChild(oval); stage.appendChild(ringWrap); stage.appendChild(info); stage.appendChild(tip);
     var bar = el('div', 'display:flex;gap:8px;padding:10px;background:#15110d;flex-wrap:wrap;');
     btnStart = btn('시작', true, start);
     btnManual = btn('수동 찍기', false, manualShot); btnManual.style.display = 'none';
-    btnFlip = btn('좌우 바꾸기', false, function () { userFlip = !userFlip; toast('좌우를 ' + (userFlip ? '바꿨어요' : '원래대로 했어요')); });
+    btnFlip = btn('좌우 바꾸기', false, function () { userFlip = !userFlip; toast(userFlip ? '좌우를 바꿨어요' : '좌우를 원래대로 했어요'); });
     btnDone = btn('완료', true, finish);
-    bar.appendChild(btn('닫기', false, close)); bar.appendChild(btnStart); bar.appendChild(btnManual); bar.appendChild(btnFlip); bar.appendChild(btnDone);
+    btnCam = btn('카메라 다시 열기', true, function () { stopCam(); releaseAppCam(); openCam(0); }); btnCam.style.display = 'none';
+    bar.appendChild(btn('닫기', false, close)); bar.appendChild(btnCam); bar.appendChild(btnStart); bar.appendChild(btnManual); bar.appendChild(btnFlip); bar.appendChild(btnDone);
     ov.appendChild(stage); ov.appendChild(bar);
     document.body.appendChild(ov);
     T = targets(); got = {}; cur = 0; drawRing();
-    var md = navigator.mediaDevices;
-    if (!md || !md.getUserMedia) { setInfo('이 브라우저에서는 카메라를 열 수 없습니다'); return; }
-    md.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }).then(function (s) {
-      if (!ov) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
-      stream = s; vid.srcObject = s;
-    }, function (e) { setInfo('카메라를 열 수 없습니다 — 권한을 확인해 주세요'); console.warn(TAG + ' 카메라 실패', e); });
+    Q.cam.ok = false;
+    camGuard = setInterval(function () { if (ov && releaseAppCam() && !Q.cam.ok) openCam(0); }, 400);   // 뒤늦게 켜진 앱 카메라를 끔
+    setTimeout(function () { openCam(0); }, hadAppCam ? 250 : 0);                                          // 앞 카메라가 놓일 틈
   };
 
   /* ── 촬영 화면의 버튼 줄 ──────────────────────────────────────────────── */
@@ -339,7 +458,7 @@
     var b0 = small_btn('🔄 360° 촬영', Q.open); b0.className = 'btn btn-primary'; rowEl.appendChild(b0);
     Q.loadSet().then(function (set) {
       if (!rowEl) return;
-      if (set && set.frames) rowEl.appendChild(small_btn('저장된 360 (' + set.frames.length + '장)', function () { Q.applySet(set); }));
+      if (set && set.frames) rowEl.appendChild(small_btn('저장된 360 세트 불러오기 (' + set.frames.length + ')', function () { Q.applySet(set); }));
       if ((typeof state !== 'undefined' && state.shots360) || (set && set.frames)) rowEl.appendChild(small_btn('내보내기', function () { Q.exportSet((typeof state !== 'undefined' && state.shots360) || set); }));
       rowEl.appendChild(small_btn('가져오기', function () { fileIn.click(); }));
     });
