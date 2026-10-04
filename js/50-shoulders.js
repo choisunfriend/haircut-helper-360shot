@@ -21,6 +21,15 @@
  *      사람 영역의 폭이 귀 사이 거리의 2.1배를 넘는 첫 줄을 어깨선으로 보고, 그 아래 머리를 화면 왼쪽/오른쪽 따로 잽니다.
  *      후면 사진은 포즈가 잡은 어깨 높이 아래의 머리(= 등 쪽 머리)를 잽니다. 진단에 숫자로 찍습니다.
  *
+ * (2026-10-04i) 앞으로는 사진에서 넘긴 쪽만 — 사용자: "머리가 길기만 하면 다 어깨 앞으로 나온다. 사진에서 어깨 앞으로 머리를 뺀 경우만."
+ *   예전: 가닥이 몸통에 닿기 직전에 어깨 능선보다 앞에 있었으면 무조건 앞으로 보냈습니다(사진 인지는 능선 근처의 애매한 가닥에만 씀).
+ *        그래서 긴 머리는 옆머리가 전부 어깨 앞으로 나왔습니다.
+ *   지금: 그쪽(왼/오른)을 사진에서 어깨 앞으로 넘겼다고 인지했을 때만 예전 규칙. 아니면
+ *        · 몸통에 닿은 가닥은 전부 뒤로(어깨 위에 얕게 걸친 점은 그대로 위에 얹음),
+ *        · 몸통에 닿지 않고 어깨 앞에 떠 있는 점(어깨 윗면보다 아래 · 몸통 앞면보다 앞)도 뒤로 보냅니다.
+ *        목 바로 아래 가운데 띠(|x| < centerBand)는 예외 — 뒤로 보내면 목을 가로지르므로 예전 규칙 그대로.
+ *   되돌리기: SHOULDER.frontOnlyIfDraped=false; SHOULDER.refresh()
+ *
  * 끄기: SHOULDER.on=false; SHOULDER.refresh()      (어깨만 끔 · 목 기둥은 REGROW.neck=false)
  * 조절: SHOULDER.margin(몸에서 띄우는 거리) · SHOULDER.restMax(이보다 얕게 걸치면 위에 얹음) 후 SHOULDER.refresh()
  * ========================================================================== */
@@ -37,9 +46,11 @@
     restMax: 0.07,      // 어깨 윗면에서 이보다 얕게 든 점은 위에 얹음(≈ 1.3cm)
     ambig: 0.2,         // 능선에서 이 안쪽(≈ 3.7cm)이면 앞/뒤가 애매 → 사진 인지를 따름
     shoulderRatio: 2.1, // 사진에서 사람 폭이 귀 사이 거리의 이 배수를 넘는 줄 = 어깨선
-    earSpanCm: 15       // 귀 사이 거리(cm 환산용 어림)
+    earSpanCm: 15,      // 귀 사이 거리(cm 환산용 어림)
+    frontOnlyIfDraped: true,   // (2026-10-04i) 사진에서 어깨 앞으로 넘긴 쪽만 앞으로 — 아니면 전부 뒤로
+    centerBand: 0.3     // 가운데 띠 반폭(≈ 5.5cm) — 이 안쪽은 뒤로 보내지 않음(목을 가로지르게 됨)
   }, W.SHOULDER || {});
-  var S = H.stats = { strands: 0, touched: 0, front: 0, back: 0, rest: 0, neck: 0, ms: 0, src: '', item: '', err: null };
+  var S = H.stats = { strands: 0, touched: 0, front: 0, back: 0, rest: 0, neck: 0, forced: 0, swept: 0, ms: 0, src: '', item: '', err: null };
   var grid = null, gridKey = null, ver = 1, pending = null, pendingKey = null;
 
   function scr() { try { return currentScreen; } catch (e) { return ''; } }
@@ -225,11 +236,23 @@
     var ix = ax / g.cell | 0, iy = (g.yTop - q.y) / g.cell | 0, k = iy * g.NX + ix, zf = g.ZF[k];
     if (zf === -Infinity) return q;
     var zb = g.ZB[k], m = H.margin;
-    if (!(q.z > zb - m && q.z < zf + m)) return q;
+    // (2026-10-04i) 사진에서 이쪽을 어깨 앞으로 안 넘겼으면 앞에 두지 않음(가운데 띠는 예외)
+    var only = H.frontOnlyIfDraped && ax >= H.centerBand;
+    if (only && st.drp == null) st.drp = drapedAt(q.x);
+    var noFront = only && !st.drp;
+    if (!(q.z > zb - m && q.z < zf + m)) {
+      // 몸통 밖 — 어깨 윗면보다 아래에서 몸통 앞에 떠 있는 점
+      if (noFront && q.z >= zf + m && q.y < g.TOP[ix]) {
+        if (!st.pref) { st.pref = 'back'; S.touched++; S.back++; S.forced++; }
+        if (st.pref === 'back') { S.swept++; return { x: q.x, y: q.y, z: zb - m }; }
+      }
+      return q;
+    }
     // 몸통 안
     if (!st.pref) {
       var mid = (zf + zb) / 2, ref = prev ? prev.z : q.z;
-      if (Math.abs(ref - mid) < H.ambig) st.pref = drapedAt(q.x) ? 'front' : 'back';
+      if (noFront) { st.pref = 'back'; if (ref > mid) S.forced++; }
+      else if (Math.abs(ref - mid) < H.ambig) st.pref = drapedAt(q.x) ? 'front' : 'back';
       else st.pref = ref > mid ? 'front' : 'back';
       S.touched++; if (st.pref === 'front') S.front++; else S.back++;
     }
@@ -243,11 +266,11 @@
     var hit = passMemo.get(list);
     if (hit && hit.ver === ver) return hit.out;
     var t0 = now(), n = list.length, out = new Array(n), i, k, e, p, np, st, r, top = grid.yTop + 0.6;
-    S.strands = n; S.touched = S.front = S.back = S.rest = S.neck = 0;
+    S.strands = n; S.touched = S.front = S.back = S.rest = S.neck = S.forced = S.swept = 0;
     for (i = 0; i < n; i++) {
       e = list[i]; p = e && e.pts; np = null;
       if (p && p.length > 1) {
-        st = { pref: null };
+        st = { pref: null, drp: null };
         for (k = 1; k < p.length; k++) {
           if (!(p[k].y < top)) continue;
           r = pushPoint(p[k], np ? np[k - 1] : p[k - 1], st);
@@ -298,7 +321,8 @@
     a = TAG + ' 켜짐 · ' + (grid ? '몸통 메쉬에서 읽음(' + S.src + (S.item ? ' · ' + S.item : '') + ') — 어깨 끝(팔 바깥)까지 반폭 ' + (grid.halfW * cm).toFixed(1) + 'cm · 거기서 윗면이 목 밑동보다 ' + (grid.drop * cm).toFixed(1) + 'cm 낮음 · 칸 ' + grid.filled
       : '아직 못 읽음(몸통 메쉬를 불러오기 전)' + (pending ? ' · 불러오는 중' : '')) + (S.err ? ' · ⚠ ' + S.err : '');
     L = L.concat([a]);
-    if (grid) L.push('  적용(직전) — 가닥 ' + S.strands + '개 중 몸통에 닿은 가닥 ' + S.touched + ' (앞으로 ' + S.front + ' / 뒤로 ' + S.back + ') · 어깨 위에 얹은 점 ' + S.rest + ' · 목 밖으로 민 점 ' + S.neck + ' · ' + Math.round(S.ms) + 'ms');
+    if (grid) L.push('  적용(직전) — 가닥 ' + S.strands + '개 중 몸통에 닿은 가닥 ' + S.touched + ' (앞으로 ' + S.front + ' / 뒤로 ' + S.back + ') · 어깨 위에 얹은 점 ' + S.rest + ' · 목 밖으로 민 점 ' + S.neck + ' · ' + Math.round(S.ms) + 'ms' +
+      (H.frontOnlyIfDraped ? ' · 앞은 사진에서 넘긴 쪽만: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')' : ' · 앞은 사진에서 넘긴 쪽만: 꺼짐'));
     try {
       var R = recognize(), F = R.front;
       if (F) {
