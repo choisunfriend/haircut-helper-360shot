@@ -52,7 +52,21 @@
  *     · 뿌리 볼륨 — 윗머리(크라운+프론트) 뿌리 자리의 두께(cm)에서. 35 + 10×cm (1.5cm = 50 중립, 3.5cm = 70).
  *     · 넘김 — 윗머리 가닥이 뒤로 흐르는 정도(+ 뒤로 · − 앞으로).
  *     · 가르마 — 위치·세기를 재서 보여 주기만 합니다(스펙에는 아직 안 넣음 — 좌우 부호를 실제 사진으로 확인한 뒤 넣을 것).
- *     · 컬 — 아직 안 잽니다(0으로 저장).
+ *     · 컬 — (v4에서 잼 · 아래)
+ *
+ * v4 (2026-10-04h) 컬 재기 — 곱슬머리 사진을 다시 기르면 직모처럼 나왔습니다(실측: 앞머리가 눈까지 덮인 곱슬 단발 → 매끈한 바가지 머리).
+ *   왜: 다시 기르기는 한 걸음 ≈0.4cm에 관성 55%로 결을 따라가고, 다 기른 뒤 두 번 폅니다. 지름 1~2cm짜리 컬은 이 걸음으로는
+ *       따라갈 수 없어서 가닥은 "컬을 편 뼈대"만 남습니다. 그리고 컬 값은 재지 않고 0으로 넣었습니다.
+ *   무엇을:
+ *     · 재기 — 03a가 뷰마다 재 둔 "결이 꺾이는 정도"(curlDegPerPx: 결을 따라 6px 간 자리의 결 방향이 몇 도 달라졌나 ÷ 6)의
+ *       뷰 중앙값을 컬 0~curlMax로 옮깁니다(curlLo 이하 = 0 · curlHi 이상 = curlMax · 사이는 직선).
+ *       ⚠ curlLo·curlHi는 합성 무늬(직모 0.1 · 굵은 웨이브 2.5 · 곱슬 3.6~4.9 °/px)로 잡은 어림값입니다 — 실제 사진 몇 장의
+ *         진단 줄([스타일 숫자] 컬 …)을 보고 고쳐야 합니다. 로드 굵기(웨이브)는 못 재서 기본값 50.
+ *     · 보이기 — 잰 컬을 섹션 컬 슬라이더에 넣고, 가닥에는 기존 컬 엔진(curlStrand3D)으로 겁니다.
+ *       컬을 주면 가닥이 그만큼 짧아지므로(나선), 잰 컬에서 겉모양이 사진과 같도록 가닥의 "편 길이"를 미리 늘려 잡습니다
+ *       (사진에 보이는 길이 ÷ 남는 비율). 그래서 컬을 내리면 머리가 길어지고(펴짐), 올리면 짧아집니다.
+ *     · 컬이 0으로 재진 머리(직모)는 예전과 똑같습니다(가닥을 손대지 않음).
+ *   끄기: REGROW.curl=false 후 마네킹을 켰다 끄기.
  *
  * 끄기: 버튼 또는 REGROW.on=false 후 REGROW.refresh()
  * ========================================================================== */
@@ -76,6 +90,13 @@
     inertia: 0.55,      // 직전 방향을 섞는 비율(0 = 사진 결 그대로)
     smooth: 2,          // 다 기른 뒤 고르게 펴는 횟수
     liftK: 2.2,         // 짧은 머리 길이 어림 = 뿌리 자리 두께 × 이 값
+    // (2026-10-04h) 컬 재기 — 머리말 v4 참고
+    curl: true,
+    curlLo: 1.8, curlHi: 4.0,   // 결 꺾임(°/px) 이 구간을 컬 0 → curlMax로 (⚠ 합성 무늬로 잡은 어림값)
+    curlMax: 90,                // 100이면 가닥 점 수가 3배(나선 11바퀴) — 90이면 2배쯤
+    curlMin: 10,                // 이보다 작게 재지면 0(직모)으로 봄
+    curlMinN: 20,               // 뷰의 표본 수가 이보다 많아야 믿음
+    curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     minLenCm: 0.8,
     tapPx: 4,           // 머리 영역 판정 여유(800px 기준)
     gravity: 0.25,      // 두피 밖 구간에서 중력을 섞는 비율
@@ -631,10 +652,11 @@
   function summary(r) {     // 미리보기 꼬리표에 넣는 한 줄
     try {
       var sp = r.spec, top, side, back;
-      if (r.isLong) return '원본 머리 · 치수 잼 — 긴 머리 · 볼륨 ' + sp.styling.volume + ' · 넘김 ' + (sp.styling.sweep > 0 ? '+' : '') + sp.styling.sweep;
+      var ct = (sp.perm && sp.perm.curl > 0) ? ' · 컬 ' + sp.perm.curl : '';
+      if (r.isLong) return '원본 머리 · 치수 잼 — 긴 머리 · 볼륨 ' + sp.styling.volume + ' · 넘김 ' + (sp.styling.sweep > 0 ? '+' : '') + sp.styling.sweep + ct;
       top = sp.lenCm.crown != null ? sp.lenCm.crown : sp.lenCm.front; side = sp.lenCm.side != null ? sp.lenCm.side : sp.lenCm.temple;
       back = sp.lenCm.occipital != null ? sp.lenCm.occipital : sp.lenCm.nape;
-      return '원본 머리 · 치수 잼 — 윗머리 ' + (top != null ? top : '?') + 'cm · 옆 ' + (side != null ? side : '?') + 'cm · 뒤 ' + (back != null ? back : '?') + 'cm · 볼륨 ' + sp.styling.volume;
+      return '원본 머리 · 치수 잼 — 윗머리 ' + (top != null ? top : '?') + 'cm · 옆 ' + (side != null ? side : '?') + 'cm · 뒤 ' + (back != null ? back : '?') + 'cm · 볼륨 ' + sp.styling.volume + ct;
     } catch (e) { return '원본 머리 · 치수 잼'; }
   }
   /* 다시 기른 머리에서 잰 값을 슬라이더에 넣고 그 상태를 기준으로 삼음 */
@@ -646,15 +668,16 @@
     var r = null; try { r = G.measure(); } catch (e) { console.warn(TAG + ' 치수 재기 실패', e); }
     var sty = null; try { sty = neutralStyling(); } catch (e) { sty = { sweep: 0, volume: 50, flow: 0, part: 0, partAmt: 0, finish: 50, sleek: 0 }; }
     if (r && r.spec && r.spec.styling) { sty.sweep = r.spec.styling.sweep; sty.volume = r.spec.styling.volume; }
+    var curl0 = (r && r.spec && r.spec.perm && r.spec.perm.curl > 0) ? r.spec.perm.curl : 0;
     var base = { sections: {}, sty: { sweep: sty.sweep || 0, volume: typeof sty.volume === 'number' ? sty.volume : 50 }, src: photo, measured: r };
     try {
       secOrder().forEach(function (sec) {
         var d = {}; try { d = clone(SECTIONS[sec].defaults) || {}; } catch (e) {}
-        d.curl = 0;                                                  // 지금 결이 기준 — 컬은 "더한 만큼"
+        d.curl = curl0;                                              // 사진에서 잰 컬(직모면 0 = 지금 결 그대로)
         state.sections[sec] = d;
-        base.sections[sec] = { length: d.length, curl: 0 };
+        base.sections[sec] = { length: d.length, curl: curl0 };
       });
-      state._globalCurl = 0;
+      state._globalCurl = curl0;
       var sbv = {}; (typeof ANGLES !== 'undefined' ? ANGLES : ['front', 'left', 'right', 'back']).forEach(function (a) { sbv[a] = Object.assign({}, sty); });
       state.stylingByView = sbv;
       try { if (typeof bindStylingToCurrentView === 'function') bindStylingToCurrentView(); } catch (e) {}
@@ -671,9 +694,26 @@
   function atBase(sec, cur, sty) {
     var b = G.base; if (!b) return true;
     var bs = b.sections[sec] || {};
-    return (cur.length === bs.length || typeof cur.length !== 'number') && !((cur.curl || 0) > (bs.curl || 0)) &&
+    return (cur.length === bs.length || typeof cur.length !== 'number') && (cur.curl || 0) === (bs.curl || 0) &&
       (sty.sweep || 0) === b.sty.sweep && (typeof sty.volume !== 'number' || sty.volume === b.sty.volume) &&
       !(sty.part) && !(sty.flow) && !(sty.sleek);
+  }
+  /* 컬 c를 걸면 가닥이 차지하는 뼈대 길이 ÷ 가닥 길이 (14 curlStrand3D와 같은 식 — 로드 굵기와 무관) */
+  function curlRemain(c) {
+    var F = (typeof CURL3D_FIX !== 'undefined') ? CURL3D_FIX : { ampGamma: 1, radiusGamma: 0.5 };
+    var a = Math.pow(Math.max(0, Math.min(100, c || 0)) / 100, F.ampGamma || 1), rr = Math.pow(a, F.radiusGamma || 1), h = 2.6 - 2.28 * a;
+    return a > 0 ? h / Math.sqrt(rr * rr + h * h) : 1;
+  }
+  G.curlRemain = curlRemain;
+  /* 끝 방향으로 점 하나를 덧대 호길이를 ratio배로 */
+  function padArc(pts, ratio) {
+    var n = pts.length; if (n < 2 || !(ratio > 1)) return pts;
+    var L = 0, i; for (i = 1; i < n; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y, pts[i].z - pts[i - 1].z);
+    var a = pts[n - 2], t = pts[n - 1], dx = t.x - a.x, dy = t.y - a.y, dz = t.z - a.z, dl = Math.hypot(dx, dy, dz);
+    if (!(L > 1e-9) || !(dl > 1e-9)) return pts;
+    var add = L * (ratio - 1) / dl, out = pts.slice();
+    out.push({ x: t.x + dx * add, y: t.y + dy * add, z: t.z + dz * add });
+    return out;
   }
   /* 다시 기른 가닥: 기준에서 움직인 만큼만 */
   function adjustRegrown(s, lenOverride, styOverride) {
@@ -681,18 +721,26 @@
     var cur = (state.sections && state.sections[s.sec]) || {};
     var sty = (styOverride !== undefined ? styOverride : uniformStyling()) || stylingForRoot(s.pts[0]) || {};
     if (typeof lenOverride === 'number') cur = Object.assign({}, cur, { length: lenOverride });
-    if (atBase(s.sec, cur, sty)) return s.pts;
-    var bs = b.sections[s.sec] || {}, g = s.pts;
+    var bs = b.sections[s.sec] || {}, g = s.pts, C0 = bs.curl || 0;
+    if (atBase(s.sec, cur, sty) && !(C0 > 0)) return s.pts;            // 직모 기준 — 손대지 않음
     var r = sectionLengthRatio(s.sec, cur.length) / (sectionLengthRatio(s.sec, bs.length) || 1);
-    if (Math.abs(r - 1) > 1e-6) g = lengthStrand3D(g, r);
-    var curl = Math.max(0, (cur.curl || 0) - (bs.curl || 0));
+    // 가닥(s.pts)은 컬을 편 뼈대 — 컬은 지금 슬라이더 값을 그대로 겁니다(기준이 직모면 예전의 "더한 만큼"과 같음)
+    var curl = Math.max(0, cur.curl || 0), keep = G.curlKeepShape && C0 > 0, total = r, cover = r;
+    if (keep) {
+      total = r / curlRemain(C0);                                     // 편 길이 ÷ 뼈대 길이 (잰 컬에서 겉모양 = 사진)
+      var used = total * curlRemain(curl);                            // 컬을 건 뒤 뼈대를 차지하는 길이 ÷ 뼈대 길이
+      cover = used > 1.0005 ? used : Math.min(1, total);              // 뼈대를 실제로 늘리거나 줄일 비율
+    }
+    if (Math.abs(cover - 1) > 1e-6) g = lengthStrand3D(g, cover);
     var sweep = Math.max(-100, Math.min(100, (sty.sweep || 0) - b.sty.sweep));
     var vol = Math.max(0, Math.min(100, 50 + ((typeof sty.volume === 'number' ? sty.volume : 50) - b.sty.volume)));
     var part = sty.part || 0, spine = false;
     try { spine = typeof STYLE_ORDER !== 'undefined' && !!STYLE_ORDER.spineFirst; } catch (e) {}
     if (spine) { g = partStrand3D(g, part, curl, sty.partAmt); g = sweepStrand3D(g, sweep * sweepCurlScale(curl), curl, part, sty.partAmt); }
+    if (keep && total > cover * 1.0005) g = padArc(g, total / cover);    // 호길이만 편 길이에 맞춤(덧댄 구간은 나선이 쓰지 않음)
     g = curlStrand3D(g, curl, (typeof cur.wave === 'number' ? cur.wave : 50) / 100, typeof cur.curlDir === 'number' ? cur.curlDir : 0);
-    if (curl > 0) g = gravityDroop3D(g, curl);
+    if (keep) { if (curl > C0) g = gravityDroop3D(g, curl - C0); }     // 잰 컬까지는 사진에 이미 처져 있음 — 더한 만큼만
+    else if (curl > 0) g = gravityDroop3D(g, curl);
     if (!spine) { g = partStrand3D(g, part, curl, sty.partAmt); g = sweepStrand3D(g, sweep, curl, part, sty.partAmt); }
     g = volumeStrand3D(g, vol, s.sec);
     g = flowCurlStrand3D(g, sty.flow || 0);
@@ -793,6 +841,23 @@
    * 스타일 숫자로 재기
    * ────────────────────────────────────────────────────────────────────── */
   function clampN(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  /* 사진의 결 꺾임 → 컬 값. 뷰마다 03a가 재 둔 curlDegPerPx의 중앙값 */
+  G.photoCurl = function () {
+    var views = [], vals = [];
+    (typeof ANGLES !== 'undefined' ? ANGLES : ['front', 'left', 'right', 'back']).forEach(function (a) {
+      var mi = state.hairMasks && state.hairMasks[a], id = mi && mi.identity;
+      if (!id || id.curlDegPerPx == null || !isFinite(id.curlDegPerPx)) return;
+      var ok = id.curlN > G.curlMinN;
+      views.push({ a: a, v: id.curlDegPerPx, n: id.curlN || 0, ok: ok });
+      if (ok) vals.push(id.curlDegPerPx);
+    });
+    if (!vals.length) return { value: 0, deg: null, views: views };
+    vals.sort(function (x, y) { return x - y; });
+    var deg = vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2;
+    var v = Math.round(G.curlMax * clampN((deg - G.curlLo) / Math.max(1e-6, G.curlHi - G.curlLo), 0, 1));
+    if (v < G.curlMin) v = 0;
+    return { value: G.curl ? v : 0, raw: v, deg: deg, views: views };
+  };
   G.measure = function () {
     var m = G.model;
     if (!m || G.src !== state._hair3Dneutral || !m.strands || !m.strands.length) return null;
@@ -855,9 +920,10 @@
     }
     var styling = {}; try { styling = neutralStyling(); } catch (e) { styling = { sweep: 0, volume: 50, flow: 0, part: 0, partAmt: 0, finish: 50, sleek: 0 }; }
     styling.sweep = sweep; styling.volume = volume;
-    var spec = { name: '', cut: cut, perm: { curl: 0, wave: 50 }, styling: styling, globalCurl: 0, fade: fade, lenFallback: lenFallback, version: 1, source: 'regrow' };
+    var pc = { value: 0, deg: null, views: [] }; try { pc = G.photoCurl(); } catch (e) {}
+    var spec = { name: '', cut: cut, perm: { curl: pc.value, wave: 50 }, styling: styling, globalCurl: pc.value, fade: fade, lenFallback: lenFallback, version: 1, source: 'regrow' };
     if (info.isLong) spec.tipAt = tipAt; else spec.lenCm = lenCm;
-    return { spec: spec, isLong: info.isLong, raw: raw, tTopCm: tTop, part: part, bareShare: bareShare, order: order };
+    return { spec: spec, isLong: info.isLong, raw: raw, tTopCm: tTop, part: part, bareShare: bareShare, order: order, curl: pc };
   };
   G.measureLines = function (r) {
     r = r || G.measure();
@@ -874,7 +940,11 @@
       ' · 옆·뒤에서 사진에 머리가 없던 뿌리 ' + Math.round(r.bareShare * 100) + '%');
     L.push('  뿌리 볼륨 ' + sp.styling.volume + ' (윗머리 두께 ' + n1(r.tTopCm) + 'cm) · 넘김 ' + (sp.styling.sweep > 0 ? '+' : '') + sp.styling.sweep + ' (' + (sp.styling.sweep > 15 ? '뒤로' : sp.styling.sweep < -15 ? '앞으로' : '중립') + ')');
     L.push('  가르마(재기만 — 스펙에는 아직 안 넣음): 위치 ' + (r.part.x > 0 ? '+' : '') + r.part.x.toFixed(1) + ' (두상 반폭 대비, 모델 x축) · 양쪽으로 갈라지는 정도 ' + Math.round(r.part.score * 100) + '% · 옆으로 흐르는 세기 ' + r.part.lateral.toFixed(2));
-    L.push('  컬: 아직 안 잽니다(0으로 저장)');
+    var pc = r.curl || { value: 0, deg: null, views: [] };
+    L.push('  컬 ' + pc.value + (pc.deg == null ? ' — 결 꺾임을 잰 뷰가 없어 0' :
+      ' ← 결 꺾임 ' + pc.deg.toFixed(2) + '°/px(뷰 중앙값) · ' + pc.views.map(function (v) { return v.a + ' ' + v.v.toFixed(2) + (v.ok ? '' : '(표본 ' + v.n + ' — 안 씀)'); }).join(' · ') +
+      ' · 환산 ' + G.curlLo + '~' + G.curlHi + '°/px → 0~' + G.curlMax + ' (어림값 — 직모 사진에서 컬이 잡히면 curlLo를 올릴 것)' + (G.curl ? '' : ' · 꺼짐(REGROW.curl=false) — 켜면 ' + pc.raw)) +
+      (pc.value > 0 ? ' · 웨이브(로드 굵기)는 못 재서 50 · 편 길이 = 보이는 길이 × ' + (1 / curlRemain(pc.value)).toFixed(2) : ''));
     return L;
   };
   G.register = function () {
@@ -884,12 +954,12 @@
     if (!name || !name.trim()) return null;
     name = name.trim();
     var id = 'custom-' + Date.now(), sections = {}, sbv = {};
-    r.order.forEach(function (sec) { try { sections[sec] = Object.assign({}, SECTIONS[sec].defaults, { curl: 0 }); } catch (e) {} });
+    r.order.forEach(function (sec) { try { sections[sec] = Object.assign({}, SECTIONS[sec].defaults, { curl: r.spec.perm.curl }); } catch (e) {} });
     try { (typeof ANGLES !== 'undefined' ? ANGLES : []).forEach(function (a) { sbv[a] = Object.assign({}, r.spec.styling); }); } catch (e) {}
     r.spec.name = name;
     var color = '#2A1B12'; try { color = (state.hairMasks.front && state.hairMasks.front.avgColor) || color; } catch (e) {}
     var stl = { id: id, specId: id, spec: r.spec, name: name, tags: '원본에서 잼', isCustom: true, sections: sections, styling: Object.assign({}, r.spec.styling),
-      stylingByView: sbv, globalCurl: 0, length: 50, curl: 0, volume: r.spec.styling.volume, colorHex: color };
+      stylingByView: sbv, globalCurl: r.spec.perm.curl, length: 50, curl: r.spec.perm.curl, volume: r.spec.styling.volume, colorHex: color };
     try {
       STYLES.push(stl);
       if (typeof saveCustomStylesToStorage === 'function') saveCustomStylesToStorage();

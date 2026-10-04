@@ -59,7 +59,7 @@
     '원본 머리 · 치수 잼 — 긴 머리 · 볼륨 ': 'Your hair · measured — long hair · volume ',
     '원본 머리 · 치수 잼 — 윗머리 ': 'Your hair · measured — top ',
     '원본 머리 · 치수 잼': 'Your hair · measured',
-    'cm · 옆 ': 'cm · sides ', 'cm · 뒤 ': 'cm · back ', 'cm · 볼륨 ': 'cm · volume ', ' · 넘김 ': ' · sweep ',
+    'cm · 옆 ': 'cm · sides ', 'cm · 뒤 ': 'cm · back ', 'cm · 볼륨 ': 'cm · volume ', ' · 넘김 ': ' · sweep ', ' · 컬 ': ' · curl ',
     'ON: 마네킹 모드(컬·스타일링을 지운 상태에서 시작) · OFF: 사진에서 다시 기른 원본 머리(치수 잼)': 'ON: mannequin mode (starts with curl and styling cleared) · OFF: your own hair rebuilt from the photos (measured)',
     '원본 머리를 아직 못 쟀어요 — 마네킹을 끄고 잠시 기다려 주세요': 'Your hair hasn’t been measured yet — turn the mannequin off and wait a moment',
     '이 스타일 이름을 입력하세요 (원본 머리에서 잰 숫자로 등록)': 'Name this style (saved from the numbers measured on your hair)',
