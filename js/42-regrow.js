@@ -53,6 +53,12 @@
  *     · 가르마 — 위치·세기를 재서 보여 주기만 합니다(스펙에는 아직 안 넣음 — 좌우 부호를 실제 사진으로 확인한 뒤 넣을 것).
  *     · 컬 — 아직 안 잽니다(0으로 저장).
  *
+ * v4 (2026-10-04 · 사용자 요청)
+ *   · 화면 글자를 영어로.
+ *   · [원본 3D 그대로] 버튼이 없어졌으므로, [Regrow]를 켜면 "원본 그대로"(조정 엔진 건너뛰기)를 안에서 같이 켜고 끄면 같이 끕니다.
+ *   · [스타일 숫자 재기] 버튼을 뺐습니다. 다시 기르기가 켜진 채로 기존 [스타일 등록]을 하면 자동으로 이 머리에서 잰 숫자가
+ *     스펙으로 들어갑니다(buildSpecFromCurrent를 감쌈). 콘솔에서는 REGROW.showMeasure()로 숫자를 볼 수 있습니다.
+ *
  * 끄기: 버튼 또는 REGROW.on=false 후 REGROW.refresh()
  * ========================================================================== */
 (function () {
@@ -501,7 +507,7 @@
     }
     G.building = true; G.lastErr = null;
     var sub = null;
-    try { if (typeof showAI === 'function') { showAI('뿌리부터 다시 기르는 중…', '0%'); sub = document.getElementById('aiOverlaySub'); } } catch (e) {}
+    try { if (typeof showAI === 'function') { showAI('Regrowing hair from the roots…', '0%'); sub = document.getElementById('aiOverlaySub'); } } catch (e) {}
     (function tick() {
       var f;
       try { f = B.step(G.sliceMs); }
@@ -529,15 +535,16 @@
   };
 
   var btn = null;
-  function syncBtn() { if (btn) { btn.textContent = '다시 기르기 ' + (G.on ? 'ON' : 'OFF'); btn.classList.toggle('on', !!G.on); } }
+  function syncBtn() { if (btn) { btn.textContent = 'Regrow original: ' + (G.on ? 'ON' : 'OFF'); btn.classList.toggle('on', !!G.on); } }
   G.refresh = function () { syncBtn(); if (G.on && !G.model) G.build(); else redraw(); };
   G.toggle = function () {
     G.on = !G.on;
     if (G.on) {
       try { if (typeof MANNEQUIN !== 'undefined' && MANNEQUIN.on && typeof toggleMannequin === 'function') toggleMannequin(); } catch (e) {}
-      try { if (W.ORIG_ASIS && !W.ORIG_ASIS.on) W.ORIG_ASIS.toggle(); } catch (e) {}      // 조정 엔진이 안 섞인 결과부터 봄
       G.failedFor = null;
     }
+    // "원본 그대로"(사진 머리에는 조정 엔진을 걸지 않음)는 다시 기르기와 함께 켜고 끔
+    try { if (W.ORIG_ASIS) W.ORIG_ASIS.on = G.on; } catch (e) {}
     console.log(TAG + ' ' + (G.on ? '켬' : '끔 — 사진 가닥으로 되돌림'));
     G.refresh();
   };
@@ -551,7 +558,7 @@
     if (bar) {
       btn = document.createElement('button');
       btn.id = 'regrowBtn'; btn.type = 'button';
-      btn.title = '두피 전체에 뿌리를 심고, 사진의 결을 직접 읽어 가닥을 다시 기릅니다';
+      btn.title = 'Show the photographed hair itself: roots planted over the whole scalp, strands regrown along the flow read from the photos';
       btn.addEventListener('click', function () { G.toggle(); });
       bar.appendChild(btn); syncBtn();
     }
@@ -647,8 +654,8 @@
   };
   G.register = function () {
     var r = G.measure();
-    if (!r) { try { showToast('먼저 [다시 기르기]를 켜세요'); } catch (e) {} return null; }
-    var name = null; try { name = prompt('이 스타일 이름을 입력하세요 (원본 머리에서 잰 숫자로 등록)', ''); } catch (e) {}
+    if (!r) { try { showToast('Turn on "Regrow original" first'); } catch (e) {} return null; }
+    var name = null; try { name = prompt('Name this style (saved with the numbers measured from the original hair)', ''); } catch (e) {}
     if (!name || !name.trim()) return null;
     name = name.trim();
     var id = 'custom-' + Date.now(), sections = {}, sbv = {};
@@ -656,13 +663,13 @@
     try { (typeof ANGLES !== 'undefined' ? ANGLES : []).forEach(function (a) { sbv[a] = Object.assign({}, r.spec.styling); }); } catch (e) {}
     r.spec.name = name;
     var color = '#2A1B12'; try { color = (state.hairMasks.front && state.hairMasks.front.avgColor) || color; } catch (e) {}
-    var stl = { id: id, specId: id, spec: r.spec, name: name, tags: '원본에서 잼', isCustom: true, sections: sections, styling: Object.assign({}, r.spec.styling),
+    var stl = { id: id, specId: id, spec: r.spec, name: name, tags: 'Measured from original', isCustom: true, sections: sections, styling: Object.assign({}, r.spec.styling),
       stylingByView: sbv, globalCurl: 0, length: 50, curl: 0, volume: r.spec.styling.volume, colorHex: color };
     try {
       STYLES.push(stl);
       if (typeof saveCustomStylesToStorage === 'function') saveCustomStylesToStorage();
       if (typeof buildStyleGrid === 'function') buildStyleGrid();
-      if (typeof showToast === 'function') showToast('"' + name + '" 스타일로 등록했어요');
+      if (typeof showToast === 'function') showToast('Saved as style "' + name + '"');
       console.log(TAG + ' 스타일 등록 "' + name + '"\n' + G.measureLines(r).join('\n'));
     } catch (e) { console.warn(TAG + ' 스타일 등록 실패', e); return null; }
     return stl;
@@ -685,25 +692,31 @@
         b.style.cssText = 'min-height:30px;padding:4px 12px;border-radius:8px;border:1px solid #0f0;background:#062a06;color:#0f0;font:600 12px monospace;';
         b.addEventListener('click', function (e) { e.stopPropagation(); fn(b); }); return b;
       };
-      if (r) bar.appendChild(mk('이 숫자로 스타일 등록', function () { if (G.register()) mbox.style.display = 'none'; }));
-      bar.appendChild(mk('복사', function (b) {
-        try { navigator.clipboard.writeText(text).then(function () { b.textContent = '복사됨 ✓'; setTimeout(function () { b.textContent = '복사'; }, 1500); }, function () { b.textContent = '복사 실패'; }); } catch (e) { b.textContent = '복사 실패'; }
+      if (r) bar.appendChild(mk('Save as style', function () { if (G.register()) mbox.style.display = 'none'; }));
+      bar.appendChild(mk('Copy', function (b) {
+        try { navigator.clipboard.writeText(text).then(function () { b.textContent = 'Copied ✓'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); }, function () { b.textContent = 'Copy failed'; }); } catch (e) { b.textContent = 'Copy failed'; }
       }));
-      bar.appendChild(mk('닫기', function () { mbox.style.display = 'none'; }));
+      bar.appendChild(mk('Close', function () { mbox.style.display = 'none'; }));
       mbox.appendChild(bar); mbox.appendChild(document.createTextNode(text));
       mbox.style.display = 'block';
     } catch (e) {}
   };
-  if (G.button) try {
-    var bar3 = document.querySelector('#screen-adjust .mode-bar');
-    if (bar3) {
-      var mb = document.createElement('button');
-      mb.id = 'regrowMeasureBtn'; mb.type = 'button'; mb.textContent = '스타일 숫자 재기';
-      mb.title = '다시 기른 머리에서 길이·페이드·볼륨·넘김을 재서 스타일로 등록합니다';
-      mb.addEventListener('click', function () { G.showMeasure(); });
-      bar3.appendChild(mb);
-    }
-  } catch (e) {}
+  /* 스타일 등록 때 자동으로 재기 — 다시 기르기가 켜져 있으면, 기존 [스타일 등록]이 부르는 buildSpecFromCurrent가
+     슬라이더 값 대신 이 머리에서 잰 숫자(길이·끝 높이·페이드·볼륨·넘김)를 돌려줍니다. */
+  var origSpec = W.buildSpecFromCurrent;
+  if (typeof origSpec === 'function') W.buildSpecFromCurrent = function (name) {
+    try {
+      if (G.on && G.model && G.src === state._hair3Dneutral) {
+        var r = G.measure();
+        if (r && r.spec) {
+          r.spec.name = name;
+          console.log(TAG + ' 스타일 등록 "' + name + '" — 다시 기른 머리에서 자동으로 잰 숫자를 스펙으로 씁니다\n' + G.measureLines(r).join('\n'));
+          return r.spec;
+        }
+      }
+    } catch (e) { console.warn(TAG + ' 자동 재기 실패 — 원래 방식(슬라이더 값)으로 등록합니다', e); }
+    return origSpec.apply(this, arguments);
+  };
 
   G.lines = function () {
     var s = G.stats, L = ['[다시 기르기] ' + (G.on ? '켜짐' : '꺼짐') + (G.building ? ' · 만드는 중' : '') + (G.model && G.src === state._hair3Dneutral ? ' · 모델 있음' : ' · 모델 없음') + (G.lastErr ? ' · ⚠ ' + G.lastErr : '')];

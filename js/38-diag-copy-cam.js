@@ -135,12 +135,12 @@
         document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
         var ok = document.execCommand('copy');
         document.body.removeChild(ta);
-        flash(ok ? '복사됨 ✓' : '복사 실패');
-      } catch (e) { flash('복사 실패'); }
+        flash(ok ? 'Copied ✓' : 'Copy failed');
+      } catch (e) { flash('Copy failed'); }
     }
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(function () { flash('복사됨 ✓'); }, fallback);
+        navigator.clipboard.writeText(text).then(function () { flash('Copied ✓'); }, fallback);
         return;
       }
     } catch (e) {}
@@ -156,8 +156,8 @@
   function addBar(box, getText, onClose) {
     var bar = document.createElement('div');
     bar.style.cssText = 'position:sticky;top:-8px;display:flex;gap:8px;margin:-8px -8px 6px;padding:6px 8px;background:rgba(0,0,0,0.95);z-index:1;';
-    bar.appendChild(mkBtn('복사', function (b) { copyText(getText(), b); }));
-    if (onClose) bar.appendChild(mkBtn('닫기', onClose));
+    bar.appendChild(mkBtn('Copy', function (b) { copyText(getText(), b); }));
+    if (onClose) bar.appendChild(mkBtn('Close', onClose));
     box.insertBefore(bar, box.firstChild);
   }
 
@@ -178,7 +178,7 @@
       if (box.style.display !== 'none') return origToggle.apply(this, arguments);   // 닫기
       busy = true;
       box.style.display = 'block';
-      box.textContent = '진단 계산 중… (스타일을 고른 뒤 처음 열 때는 몇 초 걸립니다)';
+      box.textContent = 'Computing diagnostics… (takes a few seconds the first time after picking a style)';
       var t0 = now();
       afterPaint(function () {
         try {
@@ -191,7 +191,7 @@
           addBar(box, function () { return fullText(T.lastPanel); }, null);
         } catch (e) {
           box.style.display = 'block';
-          box.textContent = '진단 실패: ' + (e && e.message);
+          box.textContent = 'Diagnostics failed: ' + (e && e.message);
           console.warn(TAG + ' 진단 패널 실패', e);
         } finally { setTimeout(function () { busy = false; }, 400); }
       });

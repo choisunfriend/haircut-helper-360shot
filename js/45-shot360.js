@@ -87,10 +87,10 @@
   }
   /* set.frames[].deg 는 앱 기준 각도(+ = 손님의 왼쪽이 보이는 쪽) */
   Q.applySet = function (set) {
-    if (!set || !set.frames || !set.frames.length) { toast('360 세트가 비어 있습니다'); return Promise.resolve(false); }
+    if (!set || !set.frames || !set.frames.length) { toast('The 360° set is empty'); return Promise.resolve(false); }
     var pick = { front: nearest(set.frames, 0, 20), left: nearest(set.frames, 45, 25), right: nearest(set.frames, -45, 25), back: nearest(set.frames, 180, 35) };
     var miss = Object.keys(pick).filter(function (k) { return !pick[k]; });
-    if (miss.length) { toast('360 세트에 ' + miss.join('·') + ' 각도 사진이 없습니다 — 다시 찍어 주세요'); return Promise.resolve(false); }
+    if (miss.length) { toast('The 360° set has no ' + miss.join(' / ') + ' photo — please shoot again'); return Promise.resolve(false); }
     var cap = (typeof capShotDataURL === 'function') ? capShotDataURL : function (u) { return Promise.resolve(u); };
     var angles = ['front', 'left', 'right', 'back'];
     return Promise.all(angles.map(function (a) { return cap(pick[a].url); })).then(function (urls) {
@@ -111,20 +111,20 @@
       angles.forEach(function (a) { try { checkCaptureLandmarks(a); } catch (e) {} });
       console.log(TAG + ' 세트 적용 — ' + set.frames.length + '장 중 정면 ' + Math.round(pick.front.deg) + '° · 좌 ' + Math.round(pick.left.deg) + '° · 우 ' + Math.round(pick.right.deg) +
         '° · 후면 ' + Math.round(pick.back.deg) + '° 를 4장 슬롯에 넣음 · 나머지 ' + (set.frames.length - 4) + '장은 정보용(state.shots360)');
-      toast('360° 사진 ' + set.frames.length + '장 — 4장을 슬롯에 넣었어요');
+      toast('360° set: ' + set.frames.length + ' photos — 4 placed in the slots');
       return true;
     });
   };
   Q.exportSet = function (set) {
     set = set || (typeof state !== 'undefined' && state.shots360);
-    if (!set) { toast('내보낼 360 세트가 없습니다'); return; }
+    if (!set) { toast('No 360° set to export'); return; }
     try {
       var blob = new Blob([JSON.stringify(set)], { type: 'application/json' }), a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'shot360-' + new Date(set.at || Date.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.json';
       document.body.appendChild(a); a.click();
       setTimeout(function () { try { document.body.removeChild(a); URL.revokeObjectURL(a.href); } catch (e) {} }, 2000);
-    } catch (e) { console.warn(TAG + ' 내보내기 실패', e); toast('내보내기 실패'); }
+    } catch (e) { console.warn(TAG + ' 내보내기 실패', e); toast('Export failed'); }
   };
   Q.importFile = function (file) {
     if (!file) return;
@@ -134,7 +134,7 @@
         var set = JSON.parse(fr.result);
         if (!set || !set.frames) throw new Error('형식이 다름');
         Q.applySet(set).then(function (ok) { if (ok) Q.saveSet(set).catch(function () {}); refreshRow(); });
-      } catch (e) { toast('360 세트 파일을 읽지 못했습니다'); console.warn(TAG + ' 가져오기 실패', e); }
+      } catch (e) { toast('Could not read the 360° set file'); console.warn(TAG + ' 가져오기 실패', e); }
     };
     fr.readAsText(file);
   };
@@ -236,16 +236,16 @@
           if (!got[best] || sh > got[best].sharp * 1.1) takeFor(best, sh);
         }
         faceVote();
-        setInfo(speed > Q.slowDegPerSec ? '너무 빨라요 — 천천히 도세요' : (Object.keys(got).length >= T.length ? '다 찍었어요 — [완료]를 누르세요' : '머리를 타원 안에 두고 천천히 한 바퀴 도세요'));
-      } else setInfo('폰을 세워서 손님 머리를 향해 주세요');
-    } else setInfo('각도 센서가 없습니다 — [수동 찍기]로 한 장씩 찍으세요(정면부터 한 방향으로)');
+        setInfo(speed > Q.slowDegPerSec ? 'Too fast — walk slowly' : (Object.keys(got).length >= T.length ? 'All angles captured — tap Done' : 'Keep the head inside the oval and walk slowly all the way around'));
+      } else setInfo('Hold the phone upright and point it at the head');
+    } else setInfo('No motion sensor — use Manual shot, one photo per angle (start at the front, keep going one way)');
     drawRing();
     raf = requestAnimationFrame(tick);
   }
   function start() {
     var go = function () {
       T = targets(); got = {}; tries = {}; h0 = null; cur = 0; lastDeg = null; speed = 0; signVote = 0; signN = 0; userFlip = false;
-      running = true; btnStart.textContent = '다시 시작';
+      running = true; btnStart.textContent = 'Restart';
       W.addEventListener('deviceorientation', onOri, true);
       setTimeout(function () { if (btnManual) btnManual.style.display = sensorOk ? 'none' : ''; }, 1500);
       if (!raf) raf = requestAnimationFrame(tick);
@@ -264,7 +264,7 @@
   }
   function finish() {
     var keys = Object.keys(got);
-    if (keys.length < 4) { toast('사진이 모자랍니다 — 정면·양옆·뒤가 다 찍혀야 해요'); return; }
+    if (keys.length < 4) { toast('Not enough photos — front, both sides and back are needed'); return; }
     var s = appSign(), frames = keys.map(function (k) { var f = got[k]; return { deg: wrap(s * f.raw), url: f.url, sharp: Math.round(f.sharp), time: f.time }; });
     frames.sort(function (a, b) { return a.deg - b.deg; });
     var set = { version: 1, at: Date.now(), stepDeg: Q.stepDeg, sign: s, signAuto: !Q.sign && !userFlip && signN >= 2, sensor: sensorOk, frames: frames };
@@ -282,6 +282,32 @@
     ov = null;
     try { if (typeof initCamera === 'function' && typeof currentScreen !== 'undefined' && currentScreen === 'capture') Promise.resolve(initCamera()).then(function () { try { updateAngleUI(); } catch (e) {} }); } catch (e) {}
   }
+  /* 카메라 열기 — 앱의 전면 카메라를 막 끈 직후에는 후면 카메라가 "사용 중"으로 거절되는 기기가 있어
+     (2026-10-04 실기기: "카메라를 열 수 없습니다"), 잠깐 기다렸다가 조건을 풀어 가며 다시 시도합니다. */
+  function openCam(attempt) {
+    var md = navigator.mediaDevices;
+    if (!md || !md.getUserMedia) { setInfo('This browser cannot open the camera'); return; }
+    var tries = [
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      { video: { facingMode: 'environment' }, audio: false },
+      { video: true, audio: false }
+    ];
+    var c = tries[Math.min(attempt, tries.length - 1)];
+    setTimeout(function () {
+      if (!ov) return;
+      md.getUserMedia(c).then(function (s) {
+        if (!ov) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
+        stream = s; vid.srcObject = s;
+        try { var p = vid.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+        if (attempt > 0) console.log(TAG + ' 카메라 ' + (attempt + 1) + '번째 시도에 열림');
+      }, function (e) {
+        console.warn(TAG + ' 카메라 실패(' + (attempt + 1) + '번째)', e && e.name, e && e.message);
+        if (attempt < 5 && (!e || e.name !== 'NotAllowedError')) return openCam(attempt + 1);
+        setInfo('Cannot open the camera' + (e && e.name ? ' (' + e.name + ')' : '') + (e && e.name === 'NotAllowedError' ? ' — allow camera access for this site' : ' — close other apps using the camera and try again'));
+      });
+    }, attempt === 0 ? 350 : 500 + attempt * 300);
+  }
   Q.open = function () {
     if (ov) return;
     // 앱의 전면 카메라를 끄고 후면 카메라를 엶(폰은 두 카메라를 동시에 못 여는 경우가 많음)
@@ -294,25 +320,20 @@
     var ringWrap = el('div', 'position:absolute;right:10px;top:10px;width:104px;height:104px;background:rgba(0,0,0,.45);border-radius:50%;pointer-events:none;');
     ringWrap.innerHTML = '<svg viewBox="0 0 100 100" width="104" height="104"></svg>'; ring = ringWrap.firstChild;
     info = el('div', 'position:absolute;left:10px;right:124px;top:10px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.55);color:#f3eadf;font:600 13px/1.4 system-ui,sans-serif;',
-      '손님 정면에 서서 [시작]을 누르세요. 폰은 세워서 머리를 향하게.');
+      'Stand in front of the client and tap Start. Hold the phone upright, pointed at the head.');
     var tip = el('div', 'position:absolute;left:10px;right:10px;bottom:10px;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.45);color:#cfc5b8;font:12px/1.4 system-ui,sans-serif;',
-      '15~20초에 걸쳐 한 바퀴 · 손님은 고개와 머리카락을 움직이지 않습니다 · 출발점으로 돌아오면 [완료]');
+      'One full circle in 15–20 s · the client keeps head and hair still · back at the start, tap Done');
     stage.appendChild(vid); stage.appendChild(oval); stage.appendChild(ringWrap); stage.appendChild(info); stage.appendChild(tip);
     var bar = el('div', 'display:flex;gap:8px;padding:10px;background:#15110d;flex-wrap:wrap;');
-    btnStart = btn('시작', true, start);
-    btnManual = btn('수동 찍기', false, manualShot); btnManual.style.display = 'none';
-    btnFlip = btn('좌우 바꾸기', false, function () { userFlip = !userFlip; toast('좌우를 ' + (userFlip ? '바꿨어요' : '원래대로 했어요')); });
-    btnDone = btn('완료', true, finish);
-    bar.appendChild(btn('닫기', false, close)); bar.appendChild(btnStart); bar.appendChild(btnManual); bar.appendChild(btnFlip); bar.appendChild(btnDone);
+    btnStart = btn('Start', true, start);
+    btnManual = btn('Manual shot', false, manualShot); btnManual.style.display = 'none';
+    btnFlip = btn('Swap L/R', false, function () { userFlip = !userFlip; toast(userFlip ? 'Left/right swapped' : 'Left/right back to automatic'); });
+    btnDone = btn('Done', true, finish);
+    bar.appendChild(btn('Close', false, close)); bar.appendChild(btnStart); bar.appendChild(btnManual); bar.appendChild(btnFlip); bar.appendChild(btnDone);
     ov.appendChild(stage); ov.appendChild(bar);
     document.body.appendChild(ov);
     T = targets(); got = {}; cur = 0; drawRing();
-    var md = navigator.mediaDevices;
-    if (!md || !md.getUserMedia) { setInfo('이 브라우저에서는 카메라를 열 수 없습니다'); return; }
-    md.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }).then(function (s) {
-      if (!ov) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
-      stream = s; vid.srcObject = s;
-    }, function (e) { setInfo('카메라를 열 수 없습니다 — 권한을 확인해 주세요'); console.warn(TAG + ' 카메라 실패', e); });
+    openCam(0);
   };
 
   /* ── 촬영 화면의 버튼 줄 ──────────────────────────────────────────────── */
@@ -336,12 +357,12 @@
       host.parentNode.appendChild(fileIn);
     }
     rowEl.textContent = '';
-    var b0 = small_btn('🔄 360° 촬영', Q.open); b0.className = 'btn btn-primary'; rowEl.appendChild(b0);
+    var b0 = small_btn('🔄 360° capture', Q.open); b0.className = 'btn btn-primary'; rowEl.appendChild(b0);
     Q.loadSet().then(function (set) {
       if (!rowEl) return;
-      if (set && set.frames) rowEl.appendChild(small_btn('저장된 360 (' + set.frames.length + '장)', function () { Q.applySet(set); }));
-      if ((typeof state !== 'undefined' && state.shots360) || (set && set.frames)) rowEl.appendChild(small_btn('내보내기', function () { Q.exportSet((typeof state !== 'undefined' && state.shots360) || set); }));
-      rowEl.appendChild(small_btn('가져오기', function () { fileIn.click(); }));
+      if (set && set.frames) rowEl.appendChild(small_btn('Saved 360° (' + set.frames.length + ')', function () { Q.applySet(set); }));
+      if ((typeof state !== 'undefined' && state.shots360) || (set && set.frames)) rowEl.appendChild(small_btn('Export', function () { Q.exportSet((typeof state !== 'undefined' && state.shots360) || set); }));
+      rowEl.appendChild(small_btn('Import', function () { fileIn.click(); }));
     });
   }
   Q.refreshRow = refreshRow;

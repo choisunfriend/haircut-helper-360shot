@@ -165,9 +165,9 @@
     busy = true; again = false;
     var t0 = now(), my = ++gen, D = W.MOBILE_DIET;
     S.builds++;
-    setChip('머리 만드는 중…');
+    setChip('Building hair…');
     var pr = (D && typeof D.prepare3D === 'function')
-      ? D.prepare3D(function (f) { if (my === gen) setChip('머리 만드는 중… ' + Math.round(f * 100) + '%'); })
+      ? D.prepare3D(function (f) { if (my === gen) setChip('Building hair… ' + Math.round(f * 100) + '%'); })
       : Promise.resolve(false);
     pr.then(function () {
       busy = false;
@@ -182,7 +182,7 @@
         try { frameCameraToHead(); } catch (e) {}
         framed = true;
       }
-      if (!hintShown) { hintShown = true; setChip('드래그 회전 · Shift+드래그(두 손가락) 이동 · 휠(핀치) 확대', 4500); } else setChip('');
+      if (!hintShown) { hintShown = true; setChip('Drag to rotate · Shift+drag (two fingers) to move · wheel (pinch) to zoom', 4500); } else setChip('');
     }, function (e) { busy = false; setChip(''); console.warn(TAG + ' 헤어 준비 실패', e); });
   }
 
@@ -197,7 +197,7 @@
     if (!attach()) { if (waitN++ < 40) schedule(150); return; }
     var model = null; try { model = state.hair3Dneutral; } catch (e) {}
     if (!model || !model.strands || !model.strands.length) {       // 중립 모델은 원래 흐름(scheduleHair3DRefresh)이 만듦 — 기다림
-      setChip('3D 모델 준비 중…');
+      setChip('Preparing 3D model…');
       if (waitN++ < 120) schedule(300);
       return;
     }

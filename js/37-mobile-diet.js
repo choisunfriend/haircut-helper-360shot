@@ -625,12 +625,12 @@
       try { if (pre.ready && pre.sig === fullSig(neutral())) return runSetup(self, args, gen); } catch (e) { return runSetup(self, args, gen); }
       var shown = false, sub = null, lastPct = -1;
       try {
-        if (typeof showAI === 'function') { showAI('3D 헤어 만드는 중…', '0%'); shown = true; sub = document.getElementById('aiOverlaySub'); }
+        if (typeof showAI === 'function') { showAI('Building 3D hair…', '0%'); shown = true; sub = document.getElementById('aiOverlaySub'); }
       } catch (e) {}
       function hide() { if (shown) { shown = false; try { hideAI(); } catch (e) {} } }
       function go() {
         if (gen !== setupGen || scr() !== 'model3d') { hide(); return; }  // 그 사이 나갔거나 다시 들어옴
-        if (sub) sub.textContent = '의상·얼굴 붙이는 중…';
+        if (sub) sub.textContent = 'Attaching outfit & face…';
         try { return runSetup(self, args, gen, hide); } catch (e) { hide(); throw e; }
       }
       return new Promise(function (r) {                                  // 안내를 먼저 그리고 시작

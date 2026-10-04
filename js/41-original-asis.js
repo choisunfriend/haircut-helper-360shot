@@ -35,7 +35,9 @@
 (function () {
   'use strict';
   var W = window, TAG = '[원본 그대로]';
-  var O = W.ORIG_ASIS = Object.assign({ on: false, button: true, spikeR: 1.25, spikeCos: 0.5, sample: 1500 }, W.ORIG_ASIS || {});
+  /* (2026-10-04) 버튼 두 개([원본 3D 그대로]·[옮기기 실험])는 뺐습니다 — 사용자 요청.
+     "원본 그대로"는 [Regrow]를 켜면 42번이 안에서 같이 켭니다. 콘솔: ORIG_ASIS.toggle() · ORIG_ASIS.experiment() */
+  var O = W.ORIG_ASIS = Object.assign({ on: false, button: false, spikeR: 1.25, spikeCos: 0.5, sample: 1500 }, W.ORIG_ASIS || {});
 
   var innerAdj = W.adjustStrandGeom;
   if (typeof innerAdj !== 'function') { console.warn(TAG + ' adjustStrandGeom이 없어 건너뜀'); return; }
