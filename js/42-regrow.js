@@ -328,7 +328,8 @@
       wgt[i] = den * (areas ? areas[i] : 1); wTot += wgt[i];
     }
     if (!(wTot > 0)) return { err: '뿌리밀도가 전부 0' };
-    var total = photo.strands.length;
+    // (2026-10-04d) 가닥 수 = 48번(STRAND_BUDGET.total · 기본 30,000). 없으면 예전처럼 사진 가닥 수.
+    var total = (W.STRAND_BUDGET && W.STRAND_BUDGET.on !== false && W.STRAND_BUDGET.total > 0) ? W.STRAND_BUDGET.total : photo.strands.length;
 
     var st = { n: 0, stub: 0, skipped: 0, steps: 0, est: 0, stopMask: 0, stopCap: 0, stopMax: 0, free: 0, flipped: 0,
       len: [], kink: [], sec: {} };
