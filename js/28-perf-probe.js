@@ -596,6 +596,9 @@
         ADJ_CACHE.misses++;
       } catch (e) { key = null; }
       var st = Math.max(1, +stride || 1), out = [], acc = 0;
+      // (2026-10-04e) 48번: 조정 화면의 "전체 가닥" 요청은 일정 간격 대신 고른 가닥만(앞머리는 전부 · 옆·뒤에서 고르게 뺌)
+      var SB = G.STRAND_BUDGET, bm = null;
+      try { if (!angle && st > 1 && SB && SB._inFull && typeof SB.maskFor === 'function') bm = SB.maskFor(model); } catch (eb) { bm = null; }
       var psig = strandSig(model);
       if (psig !== M.sig) { M.sig = psig; M.map = new WeakMap(); }
       var ctx = makeCtx(model);
@@ -603,7 +606,8 @@
       for (var i = 0; i < model.strands.length; i++) {
         var s = model.strands[i];
         if (angle && s.srcAngle !== angle) continue;
-        acc += 1 / st; if (acc < 1) continue; acc -= 1;
+        if (bm) { if (!bm.keep[i]) continue; }
+        else { acc += 1 / st; if (acc < 1) continue; acc -= 1; }
         var sec = state.sections && state.sections[s.sec] || {};
         if (!ADJ_CACHE.split && typeof sec.density === 'number' && sec.density < 100 && _cutHash01(s) > Math.max(0, sec.density) / 100) continue;
         var e = psig ? M.map.get(s) : null;
@@ -631,6 +635,10 @@
 
   /* 미리 계산 — 조정·결과 화면이 조용해지면 900ms 뒤 시작, 한 번에 ~10ms씩 */
   var warmTimer = null, warmIdx = 0, warmSig = null, warmCtx = null;
+  /* (2026-10-04e) 48번이 조정 화면에서 그릴 가닥을 골라 둔 표({key, keep}) — 다른 화면이거나 48번이 없으면 null(전부) */
+  function budgetMask(model) {
+    try { var SB = G.STRAND_BUDGET; return (SB && typeof SB.maskFor === 'function') ? SB.maskFor(model) : null; } catch (e) { return null; }
+  }
   function scheduleWarm() {
     if (!Q.memo || !Q.prewarm) return;
     if (warmTimer) clearTimeout(warmTimer);
@@ -643,11 +651,13 @@
     var psig = strandSig(model);
     if (!psig) return true;
     if (psig !== M.sig) { M.sig = psig; M.map = new WeakMap(); }
-    if (psig !== warmSig) { warmSig = psig; warmIdx = 0; warmCtx = makeCtx(model); Q.warmDone = 0; }
+    var bm = budgetMask(model), wkey = psig + (bm ? '|' + bm.key : '');
+    if (wkey !== warmSig) { warmSig = wkey; warmIdx = 0; warmCtx = makeCtx(model); Q.warmDone = 0; }
     Q.warmTotal = model.strands.length;
     var t0 = now();
     while (warmIdx < model.strands.length && now() - t0 < budget) {
-      var s = model.strands[warmIdx++];
+      var wi = warmIdx++, s = model.strands[wi];
+      if (bm && !bm.keep[wi]) continue;            // 조정 화면에서 안 그리는 가닥은 계산하지 않음
       if (M.map.has(s)) continue;
       M.map.set(s, computeEntry(s, warmCtx));
       Q.warmDone++;
@@ -705,7 +715,8 @@
       var model = state.hair3Dneutral;
       if (!model || !model.strands) return false;
       var psig = strandSig(model);
-      return !!psig && psig === M.sig && psig === warmSig && warmIdx >= model.strands.length;
+      var bm = budgetMask(model), wkey = psig ? psig + (bm ? '|' + bm.key : '') : null;
+      return !!psig && psig === M.sig && wkey === warmSig && warmIdx >= model.strands.length;
     } catch (e) { return false; }
   };
   var raf2 = G.renderAdjustFrame;

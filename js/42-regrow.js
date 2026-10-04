@@ -79,6 +79,10 @@
     minLenCm: 0.8,
     tapPx: 4,           // 머리 영역 판정 여유(800px 기준)
     gravity: 0.25,      // 두피 밖 구간에서 중력을 섞는 비율
+    // (2026-10-04e) 뒷머리가 앞으로 쏠리는 것 막기 — 아래 backFix 설명 참고
+    backFix: true,
+    freeDepth: 0.6,     // 두피 밖 구간에서 사진 결이 지어낼 수 있는 깊이(카메라 쪽/반대쪽) 움직임 상한(가로·세로 움직임의 몇 배)
+    backFrom: 0.1, backFull: 0.5,   // 두피를 벗어난 자리가 얼마나 뒤쪽인가(0 = 귀 옆 · 1 = 정뒤) — 이 구간에서 0→1로 막음
     sliceMs: 30,
     seed: 20261003
   }, W.REGROW || {});
@@ -187,7 +191,7 @@
     }
 
     /* 그 자리의 결 방향을 사진들에서 직접 읽어 3D 접선 방향으로. ref가 있으면 그쪽 부호로 맞춤 */
-    function flow(p, n, ref) {
+    function flow(p, n, ref, flat) {
       var ax = 0, ay = 0, az = 0, wsum = 0, i, cam, o, R, ncx, ncy, ncz, sm, pol, dX, dY, dZ, mx, my, mz, l, w, dot;
       for (i = 0; i < cams.length; i++) {
         cam = cams[i]; if (!cam.ori) continue;
@@ -202,7 +206,9 @@
         ncx = R[0] * n.x + R[1] * n.y + R[2] * n.z; ncy = R[3] * n.x + R[4] * n.y + R[5] * n.z;
         dX = Math.cos(sm.angle) * cam.s; dY = -Math.sin(sm.angle) * cam.sy;
         dZ = -(dX * ncx + dY * ncy) / ncz;
-        l = Math.hypot(dX, dY); if (Math.abs(dZ) > 3 * l) dZ = (dZ < 0 ? -3 : 3) * l;      // 스치는 각에서 깊이가 터지는 것 막음
+        l = Math.hypot(dX, dY);
+        var zl = (flat && G.backFix) ? G.freeDepth : 3;                                     // 스치는 각에서 깊이가 터지는 것 막음(두피 밖은 더 좁게)
+        if (Math.abs(dZ) > zl * l) dZ = (dZ < 0 ? -zl : zl) * l;
         mx = R[0] * dX + R[3] * dY + R[6] * dZ; my = R[1] * dX + R[4] * dY + R[7] * dZ; mz = R[2] * dX + R[5] * dY + R[8] * dZ;
         l = Math.hypot(mx, my, mz); if (!(l > 1e-12)) continue;
         mx /= l; my /= l; mz /= l;
@@ -312,6 +318,20 @@
     var isLong = lowTips / Math.max(1, photo.strands.length) > G.longShare;
     var cPct = isLong ? G.longPct : G.lenPct, cMul = isLong ? G.longMul : G.lenMul;
     info.isLong = isLong;
+    /* (2026-10-04e) backFix — 뒷머리(두피를 뒤쪽에서 벗어난 가닥)가 목을 감아 앞으로 쏠리는 것 막기
+       실측: 앞·옆 사진에서 머리를 어깨 앞으로 넘긴 손님 → 목덜미 가닥이 전부 목 앞으로 감겨 가고 뒤는 목이 드러남.
+       원인 ① 두피 밖 구간에서도 사진의 2D 결을 "두상을 감싼 면 위의 방향"으로 올려서, 뒤 사진 가장자리에서
+              조금만 옆으로 흐르면 깊이(앞쪽) 움직임이 그 3배까지 붙었음 → 목을 감아 앞으로.
+            ② 앞으로 간 자리는 앞·옆 사진(어깨 앞으로 넘긴 머리)이 "머리 맞음"이라고 해 줘서 계속 자람.
+       고침 ① 두피 밖 구간은 깊이 움직임을 freeDepth배까지만.
+            ② 뒤쪽에서 두피를 벗어난 가닥은 앞(z+)으로 못 감(뒤쪽일수록 강하게).
+            ③ 그 가닥의 길이는 뒤 사진이 정함 — 뒤 사진에서 뜬 가닥들의 끝 높이까지는 다른 사진이 "머리 없음"이라 해도 이어 감. */
+    var backTips = [];
+    if (G.backFix && isLong) {
+      photo.strands.forEach(function (s) { if (s.srcAngle === 'back') { var ty = s.pts[s.pts.length - 1].y; if (ty < yBody) backTips.push(ty); } });
+      backTips.sort(function (x, y) { return x - y; });               // 낮은(긴) 것부터
+    }
+    var backTipOK = backTips.length >= 20;
     var capAll = q(allLen, cPct) * cMul, cap = {};
     Object.keys(lenBy).forEach(function (k) { cap[k] = q(lenBy[k], cPct) * cMul; });
     function capFor(sec) { return cap[sec] > 0 ? cap[sec] : (capAll > 0 ? capAll : 0.5); }
@@ -332,6 +352,7 @@
     var total = (W.STRAND_BUDGET && W.STRAND_BUDGET.on !== false && W.STRAND_BUDGET.total > 0) ? W.STRAND_BUDGET.total : photo.strands.length;
 
     var st = { n: 0, stub: 0, skipped: 0, steps: 0, est: 0, stopMask: 0, stopCap: 0, stopMax: 0, free: 0, flipped: 0,
+      backN: 0, backFwd: 0, backKeep: 0, backLen: [],
       len: [], kink: [], sec: {} };
     var down = { x: 0, y: -1, z: 0 };
 
@@ -357,6 +378,7 @@
       var stp = Math.max(G.step, Lcap / G.maxSteps);      // 긴 가닥은 걸음을 넓혀 걸음 수 상한에 안 걸리게
       var tRoot = thickAt(F), rootY = F.y;
       var pts = [{ x: F.x, y: F.y, z: F.z }], P = F, s = 0, prev = null, miss = 0, k, d, dt, fl, estSteps = 0, steps = 0, free = false, stop = 'max';
+      var bw = 0, myTip = null;                                             // backFix: 뒤쪽 정도(0~1) · 이 가닥이 내려갈 끝 높이
 
       // 첫 방향과 앞뒤
       fl = flow(F, n, null);
@@ -378,7 +400,16 @@
           if (fl) fl = mixDir(prev, fl);
           dt = tangent(fl || prev, n) || prev;
           var F2 = onSurf({ x: F.x + dt.x * stp, y: F.y + dt.y * stp, z: F.z + dt.z * stp });
-          if (offScalp(cellOf(F2))) { free = true; st.free++; prev = dt; k--; steps--; continue; }
+          if (offScalp(cellOf(F2))) {
+            free = true; st.free++; prev = dt; k--; steps--;
+            if (G.backFix) {                                                // 두피를 벗어난 자리가 얼마나 뒤쪽인가
+              var ex = P.x / Es.a, ez = P.z / Es.c, eh = Math.hypot(ex, ez);
+              var tb = eh > 1e-6 ? -ez / eh : 0, tt = Math.max(0, Math.min(1, (tb - G.backFrom) / Math.max(1e-6, G.backFull - G.backFrom)));
+              bw = tt * tt * (3 - 2 * tt);
+              if (bw >= 0.5) { st.backN++; if (backTipOK) myTip = backTips[Math.min(backTips.length - 1, Math.floor(backTips.length * (0.25 + 0.5 * rnd())))]; }
+            }
+            continue;
+          }
           var n2 = normalAt(F2), s2 = s + stp, h2 = u * thickAt(F2) * Math.min(1, s2 / ramp);
           var P2 = { x: F2.x + n2.x * h2, y: F2.y + n2.y * h2, z: F2.z + n2.z * h2 };
           if (vote(P2) === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
@@ -386,13 +417,20 @@
         } else {
           // 두피 밖 구간: 결 + 중력, 두상 안으로는 못 들어감
           var rr = Math.hypot(P.x, P.z), nc = rr > 1e-6 ? { x: P.x / rr, y: 0, z: P.z / rr } : n;
-          fl = flow(P, nc, prev); if (!fl) estSteps++;
+          fl = flow(P, nc, prev, true); if (!fl) estSteps++;
           d = fl ? mixDir(prev, fl) : prev;
+          if (bw > 0 && d.z > 0) {                                          // 뒷머리는 앞으로 못 감
+            var fz = d.z * (1 - bw), fl2 = Math.hypot(d.x, d.y, fz);
+            d = fl2 > 0.2 ? { x: d.x / fl2, y: d.y / fl2, z: fz / fl2 } : down;
+            st.backFwd++;
+          }
           var gx = d.x * (1 - G.gravity), gy = d.y * (1 - G.gravity) - G.gravity, gz = d.z * (1 - G.gravity), gl = Math.hypot(gx, gy, gz) || 1;
           d = { x: gx / gl, y: gy / gl, z: gz / gl };
           var Q = { x: P.x + d.x * stp, y: P.y + d.y * stp, z: P.z + d.z * stp };
           try { Q = ellipsoidPushOut(Q, Es.a * 1.02, Es.b * 1.02, Es.c * 1.02, CY); } catch (e) {}
-          if (vote(Q) === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
+          var vq = vote(Q);
+          if (vq === 0 && myTip != null && Q.y > myTip) { vq = 1; st.backKeep++; }   // 뒤 사진의 머리 끝 높이까지는 이어 감
+          if (vq === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
           pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; prev = d;
         }
         if (s >= Lcap) { stop = 'cap'; break; }
@@ -401,10 +439,12 @@
       if (pts.length < 3) { st.skipped++; (info.skipY[sec] || (info.skipY[sec] = [])).push(rootY); return null; }   // 사진에 머리가 없는 자리 — 그루터기를 억지로 세우지 않음
       (info.plantY[sec] || (info.plantY[sec] = [])).push(rootY);
       pts = smoothPts(pts);
+      if (bw >= 0.5) { try { pts._rgKeep = true; } catch (e) {} }          // 조정 단계의 "사진 영역 밖 다듬기"가 이 가닥을 다시 자르지 않게
       var Larc = 0, ii; for (ii = 1; ii < pts.length; ii++) Larc += Math.hypot(pts[ii].x - pts[ii - 1].x, pts[ii].y - pts[ii - 1].y, pts[ii].z - pts[ii - 1].z);
       var qi = Math.min(pts.length - 1, 6), ex = pts[qi].x - pts[0].x, ey = pts[qi].y - pts[0].y, ez = pts[qi].z - pts[0].z, el = Math.hypot(ex, ey, ez) || 1;
       var rg = { t: tRoot, free: free, L: Larc, tipY: pts[pts.length - 1].y, dx: ex / el, dy: ey / el, dz: ez / el };
       if (stop === 'mask') st.stopMask++; else if (stop === 'cap') st.stopCap++; else st.stopMax++;
+      if (bw >= 0.5) st.backLen.push(Larc);
       st.steps += steps; st.est += estSteps;
 
       var view = 'front'; try { view = viewOfRoot(F0(pts)); } catch (e) {}
@@ -457,7 +497,9 @@
           estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped,
           isLong: isLong, capTxt: Object.keys(cap).map(function (k) { return k + ' ' + n1(cap[k] * cm); }).join(' · '),
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
-          cams: cams.map(function (c) { return c.angle; }).join(',')
+          cams: cams.map(function (c) { return c.angle; }).join(','),
+          backFix: !!G.backFix, backN: st.backN, backFwd: st.backFwd, backKeep: st.backKeep, backLenMed: q(st.backLen, 0.5) * cm,
+          backTipN: backTips.length, backTipCm: backTipOK ? (yTop - q(backTips, 0.5)) * cm : NaN
         };
         return { strands: out, viewCal: photo.viewCal, yTop: photo.yTop, CY: photo.CY, field: photo.field || null, occ: photo.occ || null,
           grid: photo.grid, roots: photo.roots, mannequin: false, regrown: true, rgInfo: info };
@@ -631,8 +673,12 @@
   };
 
   G.refresh = function () {
-    if (G.on && !(G.model && G.src === state._hair3Dneutral)) G.build();
-    else { if (G.on) G.applyBaseline(); redraw(); }
+    if (G.on && !(G.model && G.src === state._hair3Dneutral)) { G.build(); return; }
+    // (2026-10-04e) 이미 기준이 들어 있으면 바뀐 것이 없음 — 캐시를 흔들지 않고 다시 그리기만(예전: 조정 화면에 들어올 때마다 전부 다시 계산)
+    var same = false; try { same = !!(G.on && G.base && G.base.src === state._hair3Dneutral); } catch (e) {}
+    if (G.on) G.applyBaseline();
+    if (same) { try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {} }
+    else redraw();
   };
   /* 마네킹 상태에 맞춤 — 마네킹 OFF면 다시 기르기 켬 */
   G.sync = function () {
@@ -853,9 +899,19 @@
     L.push('  길이 ' + n1(s.lenMed) + '/' + n1(s.lenP90) + 'cm(중앙값/p90) · 꺾임 ' + n1(s.kinkMed) + '°/' + n1(s.kinkP90) + '° · 결을 사진에서 못 읽고 이어 간 걸음 ' + n1(s.estPct) + '%');
     L.push('  길이 상한(' + (s.isLong ? '긴 머리 — 넉넉히' : '짧은 머리 — 섹션 중앙값×' + G.lenMul) + ') cm: ' + s.capTxt);
     L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음) ' + s.flipped);
+    if (s.backFix) L.push('  뒷머리 앞쏠림 막기 — 뒤쪽에서 두피를 벗어난 가닥 ' + s.backN + '개(길이 중앙값 ' + n1(s.backLenMed) + 'cm) · 앞으로 가려던 걸음 ' + s.backFwd + '회 막음 · 뒤 사진 끝 높이까지 이어 간 걸음 ' + s.backKeep +
+      (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
     L.push('  두께(두피→머리 겉면) 중앙값 ' + n1(s.tMed) + 'cm · p90 ' + n1(s.tP90) + 'cm · 윤곽선으로 잰 칸 ' + s.tMeasured + ' · 이웃으로 메운 칸(추정) ' + s.tFilled + ' · 두께 0으로 잰 칸 ' + s.tZero + ' / 전체 ' + s.cells);
     return L;
   };
+  /* (2026-10-04e) backFix로 뒤로 늘어뜨린 가닥은 조정 단계의 "사진 영역 밖 다듬기"를 건너뜀
+     (그 다듬기는 앞·옆 사진까지 섞어 판정해서, 어깨 앞으로 머리를 넘긴 사진이면 목 뒤 가닥을 다시 잘라 냄) */
+  var origTrim = W.trimStrandToOccupancy3D;
+  if (typeof origTrim === 'function') W.trimStrandToOccupancy3D = function (pts, probe, stats, opts) {
+    if (G.backFix && opts && opts.srcPts && opts.srcPts._rgKeep) return pts;
+    return origTrim.apply(this, arguments);
+  };
+
   var ppl = W.perfPanelLines;
   if (typeof ppl === 'function') W.perfPanelLines = function () {
     var L = ppl.apply(this, arguments) || [];
