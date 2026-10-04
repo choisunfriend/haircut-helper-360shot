@@ -190,7 +190,11 @@
       if (D.on && D.release3D && prev === 'model3d' && name !== 'model3d') {
         release3D('3D→' + name);
         // 나가는 순간 아직 만들던 중이었다면 뒤늦게 붙는 것이 있음 — 잠시 뒤 한 번 더
-        [1500, 5000].forEach(function (ms) { setTimeout(function () { if (scr() !== 'model3d') release3D('뒤늦게 붙은 것'); }, ms); });
+        [1500, 5000].forEach(function (ms) { setTimeout(function () {
+          if (scr() === 'model3d') return;
+          if (W.ADJUST3D && W.ADJUST3D.on && scr() === 'adjust') return;   // (2026-10-04) 조정 화면이 같은 장면을 쓰는 중
+          release3D('뒤늦게 붙은 것');
+        }, ms); });
       }
       if (name === 'adjust') schedulePre();
       return r;
@@ -483,6 +487,7 @@
   var preTimer = null;
   function schedulePre(delay, cont) {
     if (!D.on || !D.pre3D) return;
+    if (D.externalDriver) return;                 // (2026-10-04) 43번(조정 화면 3D)이 직접 만들기를 몰 때는 배경 작업을 안 돌림
     if (preTimer) clearTimeout(preTimer);
     preTimer = setTimeout(function () { preTick(cont); }, delay == null ? D.preDelayMs : delay);
   }
@@ -540,6 +545,9 @@
       try {
         if (!D.on || !D.pre3D || !canStream()) return res(false);
         model = neutral(); if (!model) return res(false);
+        // (2026-10-04) 값이 바뀐 뒤 처음이면 "옛 상태 정리"를 여기서 먼저 끝냄. 예전에는 2D 그리기가 먼저 돌면서
+        // 해 줬는데, 조정 화면이 3D가 되면서(43번) 2D 그리기가 없어져 만들던 것이 중간에 버려졌음.
+        if (D.prune) pruneStale(model);
         sig = fullSig(model);
       } catch (e) { return res(false); }
       if (pre.sig === sig && pre.ready) return res(true);
@@ -668,6 +676,16 @@
       }
     };
   }
+
+  /* (2026-10-04) 장면에서 뗀 헤어 객체의 버퍼를 돌려받음 — 43번이 값이 바뀔 때마다 헤어를 갈아 끼우면서 부름 */
+  D.recycleObject = function (o) {
+    try {
+      if (!o || o.parent) return;
+      try { o.geometry.dispose(); } catch (e) {}
+      try { if (o.material && o.material.dispose) o.material.dispose(); } catch (e) {}
+      if (o.userData && o.userData._bufs && o !== pre.obj) { recycle(o.userData._bufs); o.userData._bufs = null; }
+    } catch (e2) {}
+  };
 
   /* ── 상태 ─────────────────────────────────────────────────────────────── */
   function preLine() {

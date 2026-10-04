@@ -56,6 +56,8 @@
     a.push(n, vis, el.width, el.height);
     return a.join(',');
   }
+  var forced = false;
+  G.markDirty = function () { forced = true; };
   function patchRenderer(m) {
     if (!m || !m.renderer || m.renderer.__gpuDiet) return;
     var rnd = m.renderer, orig = rnd.render, lastSig = null, lastAt = 0;
@@ -64,6 +66,7 @@
       if (!G.on || scene !== m.scene) return orig.apply(this, arguments);
       var t = now(), sig = null;
       try { sig = sceneSig(m); } catch (e) { sig = null; }
+      if (forced) { forced = false; sig = null; }                 // 내용이 바뀌었다고 알려 옴(43번: 헤어 갈아 끼움) — 바로 그림
       if (sig !== null) {
         if (sig === lastSig) {
           if (G.skipIdle && t - lastAt < G.idleMs) { S.skipped++; return; }
