@@ -46,8 +46,11 @@
  *       얼굴을 못 찾아도 뺌
  *   세트 전체: 얼굴로 확인한 사진 중 어긋난 것이 2장 이상이고 절반 이상이면, 얼굴로 확인할 수 없는 옆·뒤 사진의 센서 각도도 못 믿으므로
  *     추가 사진을 전부 안 씁니다(4장으로 계산).
- *   기준 4장(좌·우·후면)도 360 세트에서 온 것이면 같은 눈으로 봅니다: 화면 밖·얼굴 못 찾음·두피 안 맞음이면 프로브(형태 계산)에서만 뺍니다
- *     (화면과 사진 가닥은 그대로). 얼굴 각도를 못 잰 좌·우·후면은 가정값(±90°·180°) 대신 센서 각도를 씁니다(state.capturePose).
+ *   기준 4장(좌·우·후면)도 360 세트에서 온 것이면 같은 눈으로 보되, 빼지는 않고 진단에 ⚠만 띄웁니다(gateBase=false).
+ *     (2026-10-05c) 처음에는 프로브에서 뺐는데, 실측에서 더 나빠졌습니다: 후면 사진은 여전히 사진 가닥을 만드는데(13c 들어올리기)
+ *     프로브에서 후면이 빠지니 그 가닥을 다듬어 줄 점유 판정이 없어져 뒷가닥이 20cm로 길어졌고(끝 1.72 · 가시 87%),
+ *     "긴 머리"로 판정돼 짧은 머리가 어깨까지 내려왔습니다. 기준 사진은 들어올리기와 프로브가 같은 사진을 봐야 합니다.
+ *     얼굴 각도를 못 잰 좌·우·후면은 가정값(±90°·180°) 대신 센서 각도를 씁니다(state.capturePose).
  *   ⚠ 문턱값은 합성 장면과 실패 세트 한 벌로 잡은 것입니다. 진단 [360 뷰]에 사진마다 값과 뺀 이유가 찍힙니다.
  *
  * 아직 안 하는 것: 얼굴 옆 깊이에 추가 사진 쓰기 · 고개 숙임/기울임 보정 · 원근(가까운 쪽이 크게 찍히는 것).
@@ -67,6 +70,7 @@
     skip: [],           // 빼고 싶은 뷰 키(예: ['v90'])
     // (2026-10-05b) 걸러내기
     gate: true,
+    gateBase: false,    // 기준 좌·우·후면을 프로브에서 빼기 — 끔(들어올리기와 프로브가 어긋나 더 나빠짐 · 머리말 2026-10-05c). ⚠만 띄움
     edgeFrac: 0.02,     // 머리 윗선이 좌우 가장자리 이 안쪽(사진 폭 대비)에 닿으면 "화면 밖"
     interpMaxGap: 130,  // 배율 보간: 양쪽 이웃(직접 잰 뷰) 사이 각도가 이보다 넓으면 안 믿음
     qLo: 0.75, qHi: 2.3,   // 머리 윗선 반폭 ÷ 그 각도의 두상 반폭
@@ -449,7 +453,7 @@
 
   var oProbe = W.makeHairOccupancyProbe;
   if (typeof oProbe === 'function') W.makeHairOccupancyProbe = function (viewCal, names, yTop, CY, scale) {
-    X.last = { used: [], dropped: [], base: (names || []).slice(), baseDropped: [], baseInfo: {}, setBad: '', thr: null, agreeFront: null };
+    X.last = { used: [], dropped: [], base: (names || []).slice(), baseDropped: [], baseWarn: [], baseInfo: {}, setBad: '', thr: null, agreeFront: null };
     try {
       if (active() && viewCal && viewCal.front) {
         var L = X.last, vc = Object.assign({}, viewCal), nm = names.slice();
@@ -492,11 +496,13 @@
         if (X.gate) ['left', 'right', 'back'].forEach(function (a) {
           var j = nm.indexOf(a); if (j < 0) return;
           var bi = baseProblem(a, viewCal, yTop, CY, ctx); L.baseInfo[a] = bi;
-          if (bi.why) { nm.splice(j, 1); L.baseDropped.push(a); }
+          if (bi.why && X.gateBase) { nm.splice(j, 1); L.baseDropped.push(a); }
+          else if (bi.why) L.baseWarn.push(a);
         });
         console.log(TAG + ' 형태 계산: 기준 ' + nm.filter(function (n) { return BASE.indexOf(n) >= 0; }).join(',') + ' + 추가 ' + L.used.length + '장(' + (L.used.join(',') || '없음') + ')' +
           (L.dropped.length ? ' · 뺀 추가 사진 ' + L.dropped.map(function (k) { return k + '[' + X.views[k].why + ']'; }).join(' ') : '') +
           (L.baseDropped.length ? ' · 뺀 기준 사진 ' + L.baseDropped.map(function (a) { return a + '[' + L.baseInfo[a].why + ']'; }).join(' ') : '') +
+          (L.baseWarn.length ? ' · ⚠ 의심스러운 기준 사진(그대로 씀) ' + L.baseWarn.map(function (a) { return a + '[' + L.baseInfo[a].why + ']'; }).join(' ') : '') +
           (L.setBad ? ' · ⚠ ' + L.setBad : ''));
         if (L.used.length || L.baseDropped.length) return oProbe.call(this, vc, nm, yTop, CY, scale);
       }
@@ -515,7 +521,8 @@
     var la = X.last, used = la ? la.used : [];
     L.push(TAG + ' 켜짐 · 세트 ' + set.frames.length + '장 · ' + (X.note || '아직 분석 전') +
       ' · 형태 계산에 넣은 추가 사진 ' + used.length + '장' + (la && la.dropped.length ? ' · 뺀 추가 사진 ' + la.dropped.length + '장' : '') +
-      (la && la.baseDropped.length ? ' · 뺀 기준 사진 ' + la.baseDropped.join(',') : '') + (X.gate ? '' : ' · 걸러내기 꺼짐') +
+      (la && la.baseDropped.length ? ' · 뺀 기준 사진 ' + la.baseDropped.join(',') : '') +
+      (la && la.baseWarn && la.baseWarn.length ? ' · ⚠ 의심스러운 기준 사진 ' + la.baseWarn.join(',') + '(그대로 씀 — 다시 찍는 것이 좋음)' : '') + (X.gate ? '' : ' · 걸러내기 꺼짐') +
       (la ? '' : ' (3D를 아직 안 만듦)'));
     if (la && la.setBad) L.push('  ⚠ ' + la.setBad);
     if (X.bodyRuler) L.push('  배율 자 — 얼굴이 잡힌 사진은 눈→턱 · 없는 사진은 어깨선/목 밑동: ' + (X.bodyRuler.n ? '얼굴 자와 대조 ' + X.bodyRuler.n + '장 · 중앙 오차 ' + Math.round(X.bodyRuler.med * 100) + '% → ' + (X.bodyRuler.ok ? '믿음' : '⚠ 못 믿음(얼굴 없는 사진은 뺌)') : '대조할 얼굴 사진이 없어 그대로 씀'));
@@ -531,7 +538,8 @@
     });
     if (la && la.baseInfo) {
       var bl = ['left', 'right', 'back'].filter(function (a) { return la.baseInfo[a]; }).map(function (a) {
-        var bi = la.baseInfo[a]; return a + (bi.agree != null ? ' 맞음 ' + Math.round(bi.agree * 100) + '%' : '') + (bi.why ? ' → 형태 계산에서 뺌: ' + bi.why : ' → 넣음');
+        var bi = la.baseInfo[a], out = la.baseDropped.indexOf(a) >= 0;
+        return a + (bi.agree != null ? ' 맞음 ' + Math.round(bi.agree * 100) + '%' : '') + (bi.why ? (out ? ' → 형태 계산에서 뺌: ' : ' → ⚠ 의심(그대로 씀): ') + bi.why : ' → 괜찮음');
       });
       if (bl.length) L.push('  기준 사진 — ' + bl.join(' · '));
     }
