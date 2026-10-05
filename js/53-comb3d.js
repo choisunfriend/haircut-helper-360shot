@@ -36,6 +36,18 @@
  *   ③ 쓰다듬는 동안 다시 그리는 간격을 120 → 250ms(폰에서 한 번 그리는 데 0.4초라 계속 밀렸음). 손을 떼면 바로 한 번 더 그립니다.
  *   쓰는 법: 뿌리와는 상관없습니다. 뜬 머리·헝클어진 자리에 빗(원)을 올리고, 눕히고 싶은 방향으로 쓸어 주면 원 안의 겉머리만 그 방향으로 눕습니다.
  *
+ * (2026-10-05c) 화면에 보이는 대로 빗기 — 사용자: "눈에 보이는 가닥을 정리하려고 빗을 움직이는데 3D로는 그 위치가 아닌 것 같다.
+ *   뒤에만 빗질했는데 앞으로 돌려 보니 앞이 엉망이 됐다. 목 주변 가닥은 어떻게 정리할지 모르겠다. 2D로 보고 빗질한다는 걸 적용해야."
+ *   예전: 붓 = "손가락 아래에서 카메라에 가장 가까운 가닥 점 하나"를 중심으로 한 3cm 공. 그런데
+ *        · 윤곽 가장자리나 목 옆 틈에서는 가까운 쪽 머리가 없어서 반대편(앞머리) 점이 잡혔고 → 뒤에서 빗었는데 앞이 바뀜
+ *        · 공은 그 한 점 주변만 덮어서, 원 안에 보이는데 깊이가 다른 가닥(튀어나온 잔머리)은 안 바뀜
+ *   지금: 붓 = 화면의 원 그 자체. 원 안에 "보이는" 가닥 점(카메라 쪽 절반 — 두상 가운데보다 depthMargin 넘게 뒤에 있는 점은 제외)을
+ *        전부 찾아, 그 점들이 있는 3D 자리마다 작게(dab) 방향을 칠합니다. 깊이가 서로 달라도 원 안에 보이면 다 빗깁니다.
+ *        두상 반대편은 원 안에 겹쳐 보여도 건드리지 않습니다.
+ *        칠하는 자리 = 그 점이 "빗기 전에 있던 자리". 가닥에 적용할 때 빗기 전 자리에서 방향 장을 읽기 때문입니다 —
+ *        지금 보이는 자리에 칠하면, 이미 한 번 빗어서 옮겨진 가닥은 다음 빗질이 닿지 않았습니다(합성 테스트에서 확인).
+ *        그래서 적용 결과에 빗기 전 점 배열(_pre)을 달아 두고, 50번(어깨)도 그 표시를 넘겨줍니다.
+ *
  * 아직 안 되는 것 / 알아둘 것:
  *   · 등록 스타일에는 들어가지 않습니다(이 손님 화면에서만).
  *   · 쓰다듬는 동안 머리는 liveMs마다 다시 그립니다(가닥이 많으면 반 박자 늦게 따라옴).
@@ -58,15 +70,19 @@
     gripFrom: 0.12,     // 가닥의 앞 12%(뿌리 쪽)는 덜 움직임
     spacing: 0.35,      // 붓 반지름의 이 비율만큼 움직일 때마다 표본 하나
     minMovePx: 3,
-    maxSamples: 3000,
+    maxSamples: 1500,
+    dab: 0.045,         // 보이는 점마다 칠하는 작은 공의 반지름(모델 단위 ≈ 0.8cm)
+    dabCell: 0.03,      // 보이는 점을 이 크기의 3D 칸마다 하나로 줄임(≈ 0.5cm)
+    dabMax: 1500,       // 표본 하나가 칠하는 자리 수 상한(넘으면 건너뛰며 고름)
+    depthMargin: 0.2,   // 두상 가운데보다 이만큼(≈ 3.5cm) 넘게 뒤에 있는 점은 안 빗음(반대편 머리)
     liveMs: 250,        // 쓰다듬는 동안 다시 그리는 간격
     dirLagPx: 22,       // 방향 = 지나온 길에서 이만큼 뒤의 점 → 지금 점(손떨림 제거)
     touchOffset: 52,    // 터치: 빗을 손가락 위쪽 이 px에 둠(손가락에 안 가리게) · 0 = 손가락 바로 아래
     indicator: true,    // 빗 표시(점선 원 + 빗 그림)
     pickStrands: 8000   // 붓 자리 찾기에 쓰는 가닥 수 상한(넘으면 건너뛰며 씀)
   }, W.COMB3D || {});
-  C.samples = [];       // {x,y,z, dx,dy,dz, r, k, g}
-  var S = C.stats = { strokes: 0, touched: 0, _t: 0, ms: 0, pickMs: 0, pickPts: 0, err: null };
+  C.samples = [];       // {dabs: Float32Array[x,y,z,w …], m, dx,dy,dz, k, g}
+  var S = C.stats = { strokes: 0, touched: 0, _t: 0, ms: 0, pickMs: 0, pickPts: 0, dabs: 0, seen: 0, err: null };
   var ver = 0, gid = 0, modelRef = null;
 
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
@@ -84,15 +100,15 @@
   var F = null, fDone = 0, fEpoch = 0, epoch = 0;     // F: 격자 · fDone: 격자에 칠한 표본 수 · epoch: 되돌리기/지우기 때 올림
   var OFF = 512, SPAN = 1024;
   function newField() { return { map: new Map(), V: new Float32Array(3 * 4096), n: 0, mn: [Infinity, Infinity, Infinity], mx: [-Infinity, -Infinity, -Infinity] }; }
-  function splat(f, s) {
-    var cell = C.cell, r = s.r, r2 = r * r, x0 = Math.floor((s.x - r) / cell), x1 = Math.floor((s.x + r) / cell), y0 = Math.floor((s.y - r) / cell), y1 = Math.floor((s.y + r) / cell),
-      z0 = Math.floor((s.z - r) / cell), z1 = Math.floor((s.z + r) / cell), a, b, c, key, i, d2, w, V;
+  function splatPoint(f, x, y, z, r, k, dx, dy, dz) {
+    var cell = C.cell, r2 = r * r, x0 = Math.floor((x - r) / cell), x1 = Math.floor((x + r) / cell), y0 = Math.floor((y - r) / cell), y1 = Math.floor((y + r) / cell),
+      z0 = Math.floor((z - r) / cell), z1 = Math.floor((z + r) / cell), a, b, c, key, i, d2, w, V;
     if (x0 < -OFF || y0 < -OFF || z0 < -OFF || x1 >= OFF || y1 >= OFF || z1 >= OFF) return;
-    for (c = z0; c <= z1; c++) { var ez = (c + 0.5) * cell - s.z;
-      for (b = y0; b <= y1; b++) { var ey = (b + 0.5) * cell - s.y;
-        for (a = x0; a <= x1; a++) { var ex = (a + 0.5) * cell - s.x;
+    for (c = z0; c <= z1; c++) { var ez = (c + 0.5) * cell - z;
+      for (b = y0; b <= y1; b++) { var ey = (b + 0.5) * cell - y;
+        for (a = x0; a <= x1; a++) { var ex = (a + 0.5) * cell - x;
           d2 = ex * ex + ey * ey + ez * ez; if (d2 >= r2) continue;
-          w = s.k * Math.pow(1 - Math.sqrt(d2) / r, C.falloff); if (w < 0.004) continue;
+          w = k * Math.min(1, 1.6 * (1 - Math.sqrt(d2) / r)); if (w < 0.004) continue;      // 가운데는 고르게, 가장자리만 약하게
           key = (a + OFF) + SPAN * ((b + OFF) + SPAN * (c + OFF));
           i = f.map.get(key);
           if (i === undefined) {
@@ -100,12 +116,16 @@
             if (i * 3 + 3 > f.V.length) { var nv = new Float32Array(f.V.length * 2); nv.set(f.V); f.V = nv; }
           }
           V = f.V; i *= 3;
-          V[i] = V[i] * (1 - w) + s.dx * w; V[i + 1] = V[i + 1] * (1 - w) + s.dy * w; V[i + 2] = V[i + 2] * (1 - w) + s.dz * w;
+          V[i] = V[i] * (1 - w) + dx * w; V[i + 1] = V[i + 1] * (1 - w) + dy * w; V[i + 2] = V[i + 2] * (1 - w) + dz * w;
         }
       }
     }
-    if (s.x - r < f.mn[0]) f.mn[0] = s.x - r; if (s.y - r < f.mn[1]) f.mn[1] = s.y - r; if (s.z - r < f.mn[2]) f.mn[2] = s.z - r;
-    if (s.x + r > f.mx[0]) f.mx[0] = s.x + r; if (s.y + r > f.mx[1]) f.mx[1] = s.y + r; if (s.z + r > f.mx[2]) f.mx[2] = s.z + r;
+    if (x - r < f.mn[0]) f.mn[0] = x - r; if (y - r < f.mn[1]) f.mn[1] = y - r; if (z - r < f.mn[2]) f.mn[2] = z - r;
+    if (x + r > f.mx[0]) f.mx[0] = x + r; if (y + r > f.mx[1]) f.mx[1] = y + r; if (z + r > f.mx[2]) f.mx[2] = z + r;
+  }
+  function splat(f, s) {
+    var D = s.dabs, m = s.m, j, r = C.dab;
+    for (j = 0; j < m; j++) splatPoint(f, D[j * 4], D[j * 4 + 1], D[j * 4 + 2], r, s.k * D[j * 4 + 3], s.dx, s.dy, s.dz);
   }
   function syncField() {
     var n = C.samples.length;
@@ -164,6 +184,7 @@
       out[i] = { x: qx, y: qy, z: qz };
     }
     S._t++;
+    try { out._pre = g._pre || g; } catch (e2) {}                         // 빗기 전 자리(붓은 여기에 칠함 — 아래 buildPick 참고)
     return out;
   }
   C._apply = applySamples;
@@ -227,20 +248,23 @@
     var cell = Math.max(8, C.pickPx), gw = Math.ceil(rect.width / cell) + 1, gh = Math.ceil(rect.height / cell) + 1, head = new Int32Array(gw * gh).fill(-1), next = new Int32Array(total), n = 0;
     for (i = 0; i < list.length; i += stepS) {
       var pts = list[i].pts; if (!pts) continue;
+      var pre = (pts._pre && pts._pre.length === pts.length) ? pts._pre : pts;      // 빗질로 옮겨지기 전 자리
       for (k = 0; k < pts.length; k++) {
         var p = pts[k], w = e[3] * p.x + e[7] * p.y + e[11] * p.z + e[15];
         if (!(w > 1e-6)) continue;
         var sx = ((e[0] * p.x + e[4] * p.y + e[8] * p.z + e[12]) / w * 0.5 + 0.5) * rect.width, sy = (1 - ((e[1] * p.x + e[5] * p.y + e[9] * p.z + e[13]) / w * 0.5 + 0.5)) * rect.height;
         if (sx < 0 || sy < 0 || sx >= rect.width || sy >= rect.height) continue;
         var b = (sy / cell | 0) * gw + (sx / cell | 0);
-        SX[n] = sx; SY[n] = sy; SW[n] = w; PX[n] = p.x; PY[n] = p.y; PZ[n] = p.z; next[n] = head[b]; head[b] = n; n++;
+        SX[n] = sx; SY[n] = sy; SW[n] = w; PX[n] = pre[k].x; PY[n] = pre[k].y; PZ[n] = pre[k].z; next[n] = head[b]; head[b] = n; n++;
       }
     }
     // 화면 → 모델 방향: 카메라의 오른쪽·위 벡터를 머리 객체 좌표로
     var inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
     var right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).transformDirection(inv), up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).transformDirection(inv);
+    // 두상 가운데의 깊이 — 이보다 depthMargin 넘게 뒤에 있는 점은 반대편 머리
+    var cyH = isFinite(model.CY) ? model.CY : 0, wC = e[7] * cyH + e[15];
     S.pickMs = now() - t0; S.pickPts = n;
-    return { SX: SX, SY: SY, SW: SW, PX: PX, PY: PY, PZ: PZ, head: head, next: next, cell: cell, gw: gw, gh: gh, rect: rect, right: right, up: up,
+    return { wMax: wC + C.depthMargin, SX: SX, SY: SY, SW: SW, PX: PX, PY: PY, PZ: PZ, head: head, next: next, cell: cell, gw: gw, gh: gh, rect: rect, right: right, up: up,
       perPx: function (w) { return 2 * w * Math.tan(cam.fov * Math.PI / 360) / rect.height; } };
   }
   function pickAt(pk, x, y, rad) {
@@ -248,12 +272,44 @@
     for (b = by - span; b <= by + span; b++) { if (b < 0 || b >= pk.gh) continue;
       for (a = bx - span; a <= bx + span; a++) { if (a < 0 || a >= pk.gw) continue;
         for (i = pk.head[b * pk.gw + a]; i >= 0; i = pk.next[i]) {
+          if (pk.SW[i] > pk.wMax) continue;                               // 반대편 머리
           var dx = pk.SX[i] - x, dy = pk.SY[i] - y; if (dx * dx + dy * dy > r2) continue;
           if (pk.SW[i] < bw) { bw = pk.SW[i]; best = i; }
         }
       }
     }
     return best;
+  }
+  /* 화면의 원(반지름 rad px) 안에 보이는 가닥 점 전부 → [x,y,z,가중] 묶음. 너무 많으면 건너뛰며 고름 */
+  var gatherBuf = new Int32Array(8192);
+  function gather(pk, x, y, rad) {
+    var c = pk.cell, bx = x / c | 0, by = y / c | 0, span = Math.ceil(rad / c), r2 = rad * rad, a, b, i, n = 0;
+    for (b = by - span; b <= by + span; b++) { if (b < 0 || b >= pk.gh) continue;
+      for (a = bx - span; a <= bx + span; a++) { if (a < 0 || a >= pk.gw) continue;
+        for (i = pk.head[b * pk.gw + a]; i >= 0; i = pk.next[i]) {
+          if (pk.SW[i] > pk.wMax) continue;
+          var dx = pk.SX[i] - x, dy = pk.SY[i] - y; if (dx * dx + dy * dy > r2) continue;
+          if (n >= gatherBuf.length) { var nb = new Int32Array(gatherBuf.length * 2); nb.set(gatherBuf); gatherBuf = nb; }
+          gatherBuf[n++] = i;
+        }
+      }
+    }
+    if (!n) return null;
+    // 3D 칸(dabCell)마다 점 하나만 — 머리가 빽빽한 자리와 혼자 떠 있는 잔머리가 같은 세기로 칠해지게(점 수에 비례하지 않게)
+    var dc = C.dabCell, uniq = new Map(), k, key, wgt, ddx, ddy, prev;
+    for (k = 0; k < n; k++) {
+      i = gatherBuf[k];
+      ddx = pk.SX[i] - x; ddy = pk.SY[i] - y; wgt = Math.pow(1 - Math.sqrt(ddx * ddx + ddy * ddy) / rad, C.falloff);
+      key = (Math.floor(pk.PX[i] / dc) + 2048) + 4096 * ((Math.floor(pk.PY[i] / dc) + 2048) + 4096 * (Math.floor(pk.PZ[i] / dc) + 2048));
+      prev = uniq.get(key);
+      if (prev === undefined || wgt > prev[1]) uniq.set(key, [i, wgt]);
+    }
+    var m0 = uniq.size, step = Math.max(1, Math.ceil(m0 / C.dabMax)), D = new Float32Array(Math.ceil(m0 / step) * 4), j = 0, q = 0;
+    uniq.forEach(function (v) {
+      if (q++ % step) return;
+      i = v[0]; D[j * 4] = pk.PX[i]; D[j * 4 + 1] = pk.PY[i]; D[j * 4 + 2] = pk.PZ[i]; D[j * 4 + 3] = v[1]; j++;
+    });
+    return { dabs: D, m: j, seen: n };
   }
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -285,21 +341,21 @@
     var ll = Math.hypot(ld[0], ld[1]) || 1;                               // 방향만(길이 1) — 직전 방향과 섞어 손떨림을 한 번 더 누름
     if (st.vx === 0 && st.vy === 0) { st.vx = ld[0] / ll; st.vy = ld[1] / ll; }
     else { st.vx = st.vx * 0.7 + ld[0] / ll * 0.3; st.vy = st.vy * 0.7 + ld[1] / ll * 0.3; }
-    showMark(x, y, st.has ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(st.w)) / pk.perPx(st.w) : null, Math.atan2(st.vy, st.vx));
-    var i = pickAt(pk, x, y, C.pickPx), cx, cy, cz, w;
-    if (i < 0) i = pickAt(pk, x, y, C.radiusPx);
-    if (i >= 0) { cx = pk.PX[i]; cy = pk.PY[i]; cz = pk.PZ[i]; w = pk.SW[i]; }
-    else if (st.has) {                      // 머리 바깥 — 직전 깊이에서 화면 이동만큼 옮김
-      var pp = pk.perPx(st.w); cx = st.cx + (pk.right.x * mvx - pk.up.x * mvy) * pp; cy = st.cy + (pk.right.y * mvx - pk.up.y * mvy) * pp; cz = st.cz + (pk.right.z * mvx - pk.up.z * mvy) * pp; w = st.w;
-    } else { st.lx = x; st.ly = y; return; }
-    var r = Math.min(C.maxRadius, C.radiusPx * pk.perPx(w));
-    var dx = pk.right.x * st.vx - pk.up.x * st.vy, dy = pk.right.y * st.vx - pk.up.y * st.vy, dz = pk.right.z * st.vx - pk.up.z * st.vy, dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    // 원의 크기: 원 안에서 가장 가까운 점의 깊이로(상한 maxRadius)
+    var i = pickAt(pk, x, y, C.radiusPx);
+    if (i >= 0) st.w = pk.SW[i];
+    var rPx = st.w > 0 ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(st.w)) / pk.perPx(st.w) : null;
+    showMark(x, y, rPx, Math.atan2(st.vy, st.vx));
     st.lx = x; st.ly = y;
+    if (rPx == null) return;                                              // 아직 머리 위를 지난 적 없음
+    var dx = pk.right.x * st.vx - pk.up.x * st.vy, dy = pk.right.y * st.vx - pk.up.y * st.vy, dz = pk.right.z * st.vx - pk.up.z * st.vy, dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (!(dl > 1e-9)) return;
-    if (st.has) { var ex = cx - st.sx, ey = cy - st.sy, ez = cz - st.sz; if (ex * ex + ey * ey + ez * ez < (C.spacing * r) * (C.spacing * r)) { st.cx = cx; st.cy = cy; st.cz = cz; st.w = w; return; } }
+    if (st.has && Math.hypot(x - st.sx, y - st.sy) < C.spacing * rPx) return;        // 원 반지름의 spacing만큼 움직일 때마다 한 번
+    var gth = gather(pk, x, y, rPx);
+    if (!gth) return;                                                     // 원 안에 보이는 머리가 없음
     if (C.samples.length >= C.maxSamples) { if (!st.full) { st.full = true; try { showToast(lang() === 'ko' ? '빗질이 너무 많아요 — ↶로 되돌리거나 지워 주세요' : 'Too many comb strokes — undo or clear some'); } catch (e) {} } return; }
-    C.samples.push({ x: cx, y: cy, z: cz, dx: dx / dl, dy: dy / dl, dz: dz / dl, r: r, k: C.strength, g: st.g });
-    st.cx = st.sx = cx; st.cy = st.sy = cy; st.cz = st.sz = cz; st.w = w; st.has = true; st.n++;
+    C.samples.push({ dabs: gth.dabs, m: gth.m, dx: dx / dl, dy: dy / dl, dz: dz / dl, k: C.strength, g: st.g });
+    st.sx = x; st.sy = y; st.has = true; st.n++; S.dabs = gth.m; S.seen = gth.seen;
     ver++; live();
   }
   function endStroke() {
@@ -324,6 +380,7 @@
     var rc = pk.rect, oy = e.pointerType === 'touch' ? C.touchOffset : 0, x0 = e.clientX - rc.left, y0 = e.clientY - rc.top - oy;
     stroke = { id: e.pointerId, pk: pk, oy: oy, lx: x0, ly: y0, vx: 0, vy: 0, trail: [x0, y0], has: false, n: 0, g: ++gid, cx: 0, cy: 0, cz: 0, sx: 0, sy: 0, sz: 0, w: 0 };
     var i0 = pickAt(pk, x0, y0, C.radiusPx);
+    if (i0 >= 0) stroke.w = pk.SW[i0];
     showMark(x0, y0, i0 >= 0 ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(pk.SW[i0])) / pk.perPx(pk.SW[i0]) : null, null);
     e.stopPropagation();
   }
@@ -475,7 +532,7 @@
     var L = ppl.apply(this, arguments) || [];
     try {
       L.push(TAG + ' ' + (C.enabled ? (C.on ? '켜짐(빗질 모드)' : '대기') : '꺼짐') + ' · 획 ' + S.strokes + ' · 표본 ' + C.samples.length + '/' + C.maxSamples +
-        ' · 직전에 바뀐 가닥 ' + S.touched + ' · 가닥 만들기 ' + Math.round(S.ms) + 'ms(빗질 포함) · 붓 자리 찾기 준비 ' + Math.round(S.pickMs) + 'ms(점 ' + S.pickPts + ')' +
+        ' · 직전에 바뀐 가닥 ' + S.touched + ' · 가닥 만들기 ' + Math.round(S.ms) + 'ms(빗질 포함) · 붓 자리 찾기 준비 ' + Math.round(S.pickMs) + 'ms(점 ' + S.pickPts + ') · 직전 표본이 칠한 점 ' + S.dabs + '(원 안에 보인 점 ' + S.seen + ')' +
         ' · 방향 장 ' + (F ? F.n : 0) + '칸 · 붓 ' + C.radiusPx + 'px(상한 ' + C.maxRadius + ' · 지금 화면에서 ' + Math.round(markR) + 'px) · 세기 ' + C.strength + ' · 터치 빗 위치 손가락 위 ' + C.touchOffset + 'px' + (S.err ? ' · ⚠ ' + S.err : ''));
     } catch (e) {}
     return L;

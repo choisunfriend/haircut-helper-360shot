@@ -91,6 +91,20 @@
  *   짧은 머리와, 긴 머리의 목 위쪽 구간은 예전 그대로입니다.
  *   끄기: REGROW.hangDown=false 후 마네킹을 켰다 끄기.
  *
+ * v7 (2026-10-05m) 기른 뒤 결 정렬 — 사용자: "머리는 결이 중요하다. 일부러 삐죽하게 하지 않는 이상 주변 머리와 한 방향으로 나란히 정렬된다.
+ *   일일이 빗질하기 전에, 사진에서 읽힌 결과 일반적인 결 방향을 참고해서 방향을 잡아 둘 수 없나?"
+ *   다시 기르기는 가닥을 하나씩 따로 길러서, 한 가닥이 결을 잘못 읽으면 그 가닥만 혼자 튑니다(이웃을 보지 않음).
+ *   다 기른 뒤 한 번:
+ *     ① 자리(alignCell ≈ 1.3cm 칸)마다 그 칸을 지나는 가닥들의 평균 방향(= 이웃들의 결)과 가닥 수를 냅니다.
+ *        머리 겉면 밖으로 뜬 잔머리는 제 칸에 이웃이 없으므로, 두상 쪽으로 alignReach칸(≈ 4cm)까지 들어가며 가장 가까운 이웃 결을 씁니다.
+ *     ② 가닥의 마디가 그 평균에서 alignTol° 넘게 벗어나면 평균 쪽으로 돌립니다(alignFull° 이상이면 alignK만큼 · 사이는 부드럽게).
+ *        이미 나란한 마디는 안 건드립니다. 평균이 뚜렷하지 않은 칸(가르마·가마처럼 방향이 갈리는 자리 — 결집도 < alignCoh)과,
+ *        평균과 거의 반대인 마디(alignFlip° 넘음)는 그대로 둡니다. 마디 길이는 그대로라 가닥 길이는 안 변합니다.
+ *     ③ 혼자 나간 꼬리 — 끝까지 이웃이 없는 칸(가닥 수 ≤ strayMax)만 지나는 꼬리가 strayMinSeg 마디 넘으면 그 꼬리를 잘라 냅니다
+ *        (머리 밖으로 크게 휘어 나간 고리 가닥).
+ *   컬은 이 뼈대 위에 따로 얹히므로 잰 컬은 그대로 걸립니다.
+ *   끄기: REGROW.align=false 후 마네킹을 켰다 끄기.
+ *
  * 끄기: 버튼 또는 REGROW.on=false 후 REGROW.refresh()
  * ========================================================================== */
 (function () {
@@ -135,6 +149,16 @@
     // (2026-10-05k) 긴 머리는 목 아래에서 곧게 늘어뜨림 — 머리말 v6 참고
     hangDown: true,
     hangK: 0.6,         // 한 걸음마다 아래 방향을 섞는 비율(클수록 빨리 곧아짐)
+    // (2026-10-05m) 기른 뒤 결 정렬 — 머리말 v7 참고
+    align: true,
+    alignCell: 0.07,    // 이웃을 보는 칸 크기(모델 단위 ≈ 1.3cm)
+    alignK: 0.75,       // 많이 벗어난 마디를 평균 쪽으로 돌리는 세기(0~1)
+    alignTol: 12, alignFull: 40, alignFlip: 100,   // 도: 이 안쪽은 그대로 · 이 이상은 alignK만큼 · 이 넘게 반대면 안 건드림
+    alignCoh: 0.6,      // 칸의 결집도(평균 벡터 길이)가 이보다 낮으면 그 칸은 기준으로 안 씀
+    alignMin: 4,        // 칸을 지나는 가닥이 이만큼은 돼야 기준으로 씀
+    alignReach: 3,      // 제 칸에 기준이 없으면 두상 쪽으로 이 칸 수까지 들어가며 이웃 결을 찾음(겉면 밖으로 뜬 잔머리)
+    alignRoot: 0.15, alignRootFade: 0.1,   // 뿌리에서 이 길이(≈ 2.7cm)까지는 안 돌리고, 그 뒤 이 길이에 걸쳐 서서히(뿌리 볼륨을 눕히지 않게)
+    strayTrim: true, strayMax: 1, strayMinSeg: 4, strayKeep: 1,   // 혼자 나간 꼬리 자르기
     // (2026-10-04g) 목 — 늘어뜨린 가닥이 목(과 그 아래 몸통 기둥) 안으로 못 들어가게. 화면에 보이는 목과 같은 치수.
     neck: true, neckMargin: 1.1,
     sliceMs: 30,
@@ -597,6 +621,7 @@
       },
       finish: function () {
         var cm = 1; try { cm = modelCmPerUnit() || 1; } catch (e) {}
+        var al = null; try { al = G.alignStrands(out, CY); } catch (e) { console.warn(TAG + ' 결 정렬 실패(그대로 둠)', e); }
         var tv = []; for (var k = 0; k < NC; k++) if (known[k] === 1 && !offScalp(k)) tv.push(T[k] * cm);
         S = G.stats = {
           ms: Math.round(now() - t0), n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
@@ -606,6 +631,7 @@
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
           cams: cams.map(function (c) { return c.angle; }).join(','),
           neckPush: st.neckPush, backFix: !!G.backFix, backN: st.backN, backFwd: st.backFwd, backKeep: st.backKeep, backLenMed: q(st.backLen, 0.5) * cm,
+          align: al ? { on: al.on, strands: al.strands, segs: al.segs, rotMed: q(al.rot, 0.5), rotP90: q(al.rot, 0.9), trimmed: al.trimmed, trimCm: al.trimmed ? al.trimLen / al.trimmed * cm : 0, cells: al.cells, ms: Math.round(al.ms) } : null,
           backTipN: backTips.length, backTipCm: backTipOK ? (yTop - q(backTips, 0.5)) * cm : NaN,
           hang: !!hangTips, hangSrc: hangTips ? (hangTips === backTips ? '뒤 사진 가닥' : '전체 사진 가닥') : '', hangN: st.hangN, hangSteps: st.hangSteps, stopTip: st.stopTip,
           hangTipCm: hangTips ? [(yTop - q(hangTips, 0.75)) * cm, (yTop - q(hangTips, 0.25)) * cm] : null
@@ -752,6 +778,122 @@
       (sty.sweep || 0) === b.sty.sweep && (typeof sty.volume !== 'number' || sty.volume === b.sty.volume) &&
       !(sty.part) && !(sty.flow) && !(sty.sleek);
   }
+  /* ── (v7) 기른 뒤 결 정렬 ───────────────────────────────────────────────── */
+  G.alignStrands = function (strands, CY) {
+    var st = { on: !!G.align, strands: 0, segs: 0, rot: [], trimmed: 0, trimLen: 0, cells: 0, ms: 0 };
+    if (!G.align || !strands || !strands.length) return st;
+    var t0 = now(), cell = G.alignCell, OFFA = 512, SP = 1024, map = new Map(), cap = 8192, nC = 0;
+    var SX = new Float32Array(cap), SY = new Float32Array(cap), SZ = new Float32Array(cap), CN = new Float32Array(cap), NS = new Uint16Array(cap), LAST = new Int32Array(cap).fill(-1);
+    function grow() { var c2 = cap * 2, a; a = new Float32Array(c2); a.set(SX); SX = a; a = new Float32Array(c2); a.set(SY); SY = a; a = new Float32Array(c2); a.set(SZ); SZ = a;
+      a = new Float32Array(c2); a.set(CN); CN = a; a = new Uint16Array(c2); a.set(NS); NS = a; a = new Int32Array(c2).fill(-1); a.set(LAST); LAST = a; cap = c2; }
+    function keyOf(x, y, z) {
+      var a = Math.floor(x / cell) + OFFA, b = Math.floor(y / cell) + OFFA, c = Math.floor(z / cell) + OFFA;
+      if (a < 0 || b < 0 || c < 0 || a >= SP || b >= SP || c >= SP) return -1;
+      return a + SP * (b + SP * c);
+    }
+    var si, i, p, n, k, idx, ux, uy, uz, len;
+    var yCap = (isFinite(CY) ? CY : 0.15) + 0.3, reach = Math.max(0, G.alignReach | 0);
+    /* 그 자리의 "이웃 결" 칸. 제 칸에 기준이 없으면(머리 겉면 밖으로 뜬 잔머리) 두상 쪽으로 alignReach칸까지 들어가며 찾음 */
+    function consensusAt(x, y, z) {
+      var h, kk, id, ml, tx, ty, tz, tl;
+      for (h = 0; h <= reach; h++) {
+        kk = keyOf(x, y, z);
+        id = kk < 0 ? undefined : map.get(kk);
+        if (id !== undefined && NS[id] >= G.alignMin) {
+          ml = Math.sqrt(SX[id] * SX[id] + SY[id] * SY[id] + SZ[id] * SZ[id]);
+          if (ml / CN[id] >= G.alignCoh) return id;
+        }
+        tx = -x; ty = Math.min(y, yCap) - y; tz = -z; tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+        if (!(tl > 1e-6)) break;
+        x += tx / tl * cell; y += ty / tl * cell; z += tz / tl * cell;
+      }
+      return -1;
+    }
+    // ① 칸마다 평균 방향·가닥 수
+    for (si = 0; si < strands.length; si++) {
+      p = strands[si].pts; n = p.length;
+      for (i = 1; i < n; i++) {
+        ux = p[i].x - p[i - 1].x; uy = p[i].y - p[i - 1].y; uz = p[i].z - p[i - 1].z; len = Math.sqrt(ux * ux + uy * uy + uz * uz);
+        if (!(len > 1e-9)) continue;
+        k = keyOf((p[i].x + p[i - 1].x) * 0.5, (p[i].y + p[i - 1].y) * 0.5, (p[i].z + p[i - 1].z) * 0.5); if (k < 0) continue;
+        idx = map.get(k);
+        if (idx === undefined) { if (nC >= cap) grow(); idx = nC++; map.set(k, idx); }
+        SX[idx] += ux / len; SY[idx] += uy / len; SZ[idx] += uz / len; CN[idx]++;
+        if (LAST[idx] !== si) { LAST[idx] = si; if (NS[idx] < 65535) NS[idx]++; }
+      }
+    }
+    st.cells = nC;
+    var cTol = Math.cos(G.alignTol * Math.PI / 180), cFull = Math.cos(G.alignFull * Math.PI / 180), cFlip = Math.cos(G.alignFlip * Math.PI / 180), K = G.alignK;
+    var U = new Float64Array(4 * 256), alone = new Uint8Array(256);
+    // ② 벗어난 마디 돌리기 ③ 혼자 나간 꼬리
+    for (si = 0; si < strands.length; si++) {
+      var s = strands[si]; p = s.pts; n = p.length; if (n < 3) continue;
+      if (U.length < n * 4) { U = new Float64Array(n * 4 + 128); alone = new Uint8Array(n + 32); }
+      var changed = false, lo = n, hi = 0, last = n - 1, arcA = 0;
+      for (i = 1; i < n; i++) {
+        ux = p[i].x - p[i - 1].x; uy = p[i].y - p[i - 1].y; uz = p[i].z - p[i - 1].z; len = Math.sqrt(ux * ux + uy * uy + uz * uz);
+        alone[i] = 0; arcA += len;
+        if (len > 1e-9) {
+          ux /= len; uy /= len; uz /= len;
+          var mxm = (p[i].x + p[i - 1].x) * 0.5, mym = (p[i].y + p[i - 1].y) * 0.5, mzm = (p[i].z + p[i - 1].z) * 0.5;
+          k = keyOf(mxm, mym, mzm);
+          var own = k < 0 ? undefined : map.get(k);
+          idx = consensusAt(mxm, mym, mzm);
+          if (idx < 0) { if (own === undefined || NS[own] <= G.strayMax) alone[i] = 1; }
+          if (idx >= 0) {
+            {
+              var mx = SX[idx], my = SY[idx], mz = SZ[idx], ml = Math.sqrt(mx * mx + my * my + mz * mz);
+              {
+                mx /= ml; my /= ml; mz /= ml;
+                var dot = ux * mx + uy * my + uz * mz;
+                if (dot < cTol && dot > cFlip) {
+                  var tt = (cTol - dot) / Math.max(1e-6, cTol - cFull); if (tt > 1) tt = 1;
+                  var w = K * tt * tt * (3 - 2 * tt);
+                  if (arcA < G.alignRoot + G.alignRootFade) w *= arcA <= G.alignRoot ? 0 : (arcA - G.alignRoot) / G.alignRootFade;   // 뿌리에서 솟는 구간(뿌리 볼륨)은 그대로
+                  var tx = ux + (mx - ux) * w, ty = uy + (my - uy) * w, tz = uz + (mz - uz) * w, tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                  if (tl > 1e-3 && w > 0.01) {
+                    tx /= tl; ty /= tl; tz /= tl;
+                    st.segs++; if (st.segs % 13 === 0) st.rot.push(Math.acos(Math.max(-1, Math.min(1, ux * tx + uy * ty + uz * tz))) * 180 / Math.PI);
+                    ux = tx; uy = ty; uz = tz; changed = true; if (i < lo) lo = i; if (i > hi) hi = i;
+                  }
+                }
+              }
+            }
+          }
+        } else { ux = 0; uy = -1; uz = 0; len = 0; }
+        U[i * 4] = ux; U[i * 4 + 1] = uy; U[i * 4 + 2] = uz; U[i * 4 + 3] = len;
+      }
+      // 꼬리: 끝에서부터 혼자인 마디가 이어진 길이
+      var cut = n;
+      if (G.strayTrim) {
+        var run = 0; for (i = last; i >= 1 && alone[i]; i--) run++;
+        if (run >= G.strayMinSeg && n - run + G.strayKeep >= 3) cut = n - run + G.strayKeep;
+      }
+      if (!changed && cut === n) continue;
+      var out = new Array(cut), qx = p[0].x, qy = p[0].y, qz = p[0].z, s0 = Math.max(1, lo - 1), s1 = Math.min(last, hi + 1), ax, ay, az, al, i0, i1, L = 0;
+      out[0] = p[0];
+      for (i = 1; i < cut; i++) {
+        ax = U[i * 4]; ay = U[i * 4 + 1]; az = U[i * 4 + 2];
+        if (changed && i >= s0 && i <= s1) {                              // 바뀐 구간은 이웃 마디와 한 번 고르게
+          i0 = i > 1 ? i - 1 : i; i1 = i < last ? i + 1 : i;
+          ax = U[i0 * 4] + 2 * ax + U[i1 * 4]; ay = U[i0 * 4 + 1] + 2 * ay + U[i1 * 4 + 1]; az = U[i0 * 4 + 2] + 2 * az + U[i1 * 4 + 2];
+          al = Math.sqrt(ax * ax + ay * ay + az * az);
+          if (al > 1e-6) { ax /= al; ay /= al; az /= al; } else { ax = U[i * 4]; ay = U[i * 4 + 1]; az = U[i * 4 + 2]; }
+        }
+        len = U[i * 4 + 3]; L += len;
+        qx += ax * len; qy += ay * len; qz += az * len;
+        out[i] = { x: qx, y: qy, z: qz };
+      }
+      if (cut < n) { st.trimmed++; for (i = cut; i < n; i++) st.trimLen += U[i * 4 + 3]; }
+      if (changed) st.strands++;
+      try { if (p._rgKeep) out._rgKeep = true; } catch (e) {}
+      s.pts = out;
+      if (s.rg) { s.rg.L = L; s.rg.tipY = out[cut - 1].y; }
+    }
+    st.ms = now() - t0;
+    return st;
+  };
+
   /* 컬 c를 걸면 가닥이 차지하는 뼈대 길이 ÷ 가닥 길이 (14 curlStrand3D와 같은 식 — 로드 굵기와 무관) */
   function curlRemain(c) {
     var F = (typeof CURL3D_FIX !== 'undefined') ? CURL3D_FIX : { ampGamma: 1, radiusGamma: 0.5 };
@@ -1170,6 +1312,8 @@
       (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
     L.push('  곧게 늘어뜨리기(긴 머리 · 목 아래): ' + (!G.hangDown ? '꺼짐' : !s.isLong ? '짧은 머리라 안 씀' : !s.hang ? '끝 높이를 낼 사진 가닥이 모자라 안 씀' :
       '켜짐 — 곧게 내린 가닥 ' + s.hangN + '개(' + s.hangSteps + '걸음) · 끝 높이에서 멈춤 ' + s.stopTip + ' · 끝 높이 = 정수리에서 ' + n1(s.hangTipCm[0]) + '~' + n1(s.hangTipCm[1]) + 'cm 아래(' + s.hangSrc + '의 25~75%)'));
+    L.push('  결 정렬(기른 뒤): ' + (!s.align || !s.align.on ? '꺼짐' : '켜짐 — 이웃 결에서 벗어나 돌린 가닥 ' + s.align.strands + '개(마디 ' + s.align.segs + '개 · 돌린 각 중앙값 ' + n1(s.align.rotMed) + '° / p90 ' + n1(s.align.rotP90) +
+      '°) · 혼자 나간 꼬리 자름 ' + s.align.trimmed + '개(평균 ' + n1(s.align.trimCm) + 'cm) · 칸 ' + s.align.cells + ' · ' + s.align.ms + 'ms'));
     L.push('  목: ' + (G.neck ? '켜짐 — 목 안으로 들어가려던 걸음 ' + (s.neckPush || 0) + '회 밖으로 밀어냄' : '꺼짐'));
     L.push('  두께(두피→머리 겉면) 중앙값 ' + n1(s.tMed) + 'cm · p90 ' + n1(s.tP90) + 'cm · 윤곽선으로 잰 칸 ' + s.tMeasured + ' · 이웃으로 메운 칸(추정) ' + s.tFilled + ' · 두께 0으로 잰 칸 ' + s.tZero + ' / 전체 ' + s.cells);
     return L;

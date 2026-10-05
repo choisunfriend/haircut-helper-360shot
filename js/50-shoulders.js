@@ -313,7 +313,8 @@
           if (!(p[k].y < top)) continue;
           r = pushPoint(p[k], np ? np[k - 1] : p[k - 1], st);
           if (r !== p[k]) {
-            if (!np) np = p.slice(); np[k] = r;
+            if (!np) { np = p.slice(); if (p._pre) { try { np._pre = p._pre; } catch (e3) {} } }   // _pre: 53번 빗질이 달아 둔 "빗기 전 자리"
+            np[k] = r;
             if (st.k0 < 0 && st.pref === 'back' && r.z < p[k].z - H.sweepMinJump) st.k0 = k;
           }
         }
