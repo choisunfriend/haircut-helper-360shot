@@ -30,6 +30,15 @@
  *        목 바로 아래 가운데 띠(|x| < centerBand)는 예외 — 뒤로 보내면 목을 가로지르므로 예전 규칙 그대로.
  *   되돌리기: SHOULDER.frontOnlyIfDraped=false; SHOULDER.refresh()
  *
+ * (2026-10-05j) 마네킹은 전부 등 쪽으로 · 어깨를 넘어갈 때 나란히 — 사용자: "마네킹 모드가 떴을 때 어깨 부위가 갈라진 모습.
+ *   나란히 정렬해서 등 쪽으로 넘기는 게 기본."
+ *   ① 마네킹 모드(mqBack): 사진에서 넘겼는지와 상관없이 전부 뒤로(가운데 띠는 예외). 예전에는 사진이 "앞으로 넘김"이면
+ *      마네킹도 능선 앞 가닥은 앞으로, 뒤 가닥은 뒤로 가서 어깨에서 두 갈래로 갈라졌습니다.
+ *   ② 넘어가는 자리 다듬기(sweepLen): 뒤로 보낸 가닥은 어깨 아래 점만 등 면으로 옮겨져서, 어깨 높이에서 앞 → 뒤로 한 번에
+ *      꺾였습니다(옆에서 보면 가로줄). 처음 뒤로 옮겨진 점에서 가닥을 거슬러 sweepLen만큼은 z를 부드럽게 이어 줍니다
+ *      (어깨 위로 올수록 원래 자리 · 내려갈수록 등 쪽). 마네킹·원본 머리 모두 적용.
+ *   되돌리기: SHOULDER.mqBack=false · SHOULDER.sweepLen=0 후 SHOULDER.refresh()
+ *
  * 끄기: SHOULDER.on=false; SHOULDER.refresh()      (어깨만 끔 · 목 기둥은 REGROW.neck=false)
  * 조절: SHOULDER.margin(몸에서 띄우는 거리) · SHOULDER.restMax(이보다 얕게 걸치면 위에 얹음) 후 SHOULDER.refresh()
  * ========================================================================== */
@@ -48,9 +57,12 @@
     shoulderRatio: 2.1, // 사진에서 사람 폭이 귀 사이 거리의 이 배수를 넘는 줄 = 어깨선
     earSpanCm: 15,      // 귀 사이 거리(cm 환산용 어림)
     frontOnlyIfDraped: true,   // (2026-10-04i) 사진에서 어깨 앞으로 넘긴 쪽만 앞으로 — 아니면 전부 뒤로
-    centerBand: 0.3     // 가운데 띠 반폭(≈ 5.5cm) — 이 안쪽은 뒤로 보내지 않음(목을 가로지르게 됨)
+    centerBand: 0.3,    // 가운데 띠 반폭(≈ 5.5cm) — 이 안쪽은 뒤로 보내지 않음(목을 가로지르게 됨)
+    mqBack: true,       // (2026-10-05j) 마네킹 모드는 사진과 상관없이 전부 등 쪽으로
+    sweepLen: 0.45,     // 뒤로 넘어가는 자리를 가닥 길이로 이만큼(≈ 8cm) 거슬러 부드럽게 이음 · 0 = 끔
+    sweepMinJump: 0.08  // 처음 뒤로 옮겨진 점이 이만큼은 움직였을 때만 다듬음
   }, W.SHOULDER || {});
-  var S = H.stats = { strands: 0, touched: 0, front: 0, back: 0, rest: 0, neck: 0, forced: 0, swept: 0, ms: 0, src: '', item: '', err: null };
+  var S = H.stats = { strands: 0, touched: 0, front: 0, back: 0, rest: 0, neck: 0, forced: 0, swept: 0, smooth: 0, mq: false, ms: 0, src: '', item: '', err: null };
   var grid = null, gridKey = null, ver = 1, pending = null, pendingKey = null;
 
   function scr() { try { return currentScreen; } catch (e) { return ''; } }
@@ -238,8 +250,8 @@
     var zb = g.ZB[k], m = H.margin;
     // (2026-10-04i) 사진에서 이쪽을 어깨 앞으로 안 넘겼으면 앞에 두지 않음(가운데 띠는 예외)
     var only = H.frontOnlyIfDraped && ax >= H.centerBand;
-    if (only && st.drp == null) st.drp = drapedAt(q.x);
-    var noFront = only && !st.drp;
+    if (only && !st.mq && st.drp == null) st.drp = drapedAt(q.x);
+    var noFront = only && (st.mq || !st.drp);                      // 마네킹은 넘긴 사진이어도 뒤로
     if (!(q.z > zb - m && q.z < zf + m)) {
       // 몸통 밖 — 어깨 윗면보다 아래에서 몸통 앞에 떠 있는 점
       if (noFront && q.z >= zf + m && q.y < g.TOP[ix]) {
@@ -260,22 +272,45 @@
     if (dUp >= 0 && dUp < H.restMax && dUp < dZ) { S.rest++; return { x: q.x, y: g.TOP[ix] + m, z: q.z }; }   // 어깨 위에 얹음
     return { x: q.x, y: q.y, z: st.pref === 'front' ? zf + m : zb - m };
   }
+  /* 뒤로 넘어가는 자리 다듬기: k0(처음 등 면으로 옮겨진 점)에서 가닥을 거슬러 sweepLen만큼 z를 부드럽게 */
+  function sweepBack(np, p, k0) {
+    var len = H.sweepLen; if (!(len > 0) || k0 < 2) return false;
+    var zt = np[k0].z, acc = 0, j, a, b, t, sm, q, z, did = false, NK = W.REGROW && W.REGROW.neckPush;
+    for (j = k0 - 1; j >= 1; j--) {
+      acc += Math.hypot(p[j].x - p[j + 1].x, p[j].y - p[j + 1].y, p[j].z - p[j + 1].z);   // 원래 가닥의 길이로 잼
+      if (acc >= len) break;
+      a = np[j];
+      t = 1 - acc / len; sm = t * t * (3 - 2 * t);
+      z = a.z + (zt - a.z) * sm;
+      if (!(z < a.z - 1e-4)) continue;                             // 뒤쪽으로만
+      q = { x: a.x, y: a.y, z: z };
+      if (NK && q.y > grid.yTop) { try { q = NK(q) || q; } catch (e) {} }
+      np[j] = q; did = true;
+    }
+    return did;
+  }
   var passMemo = new WeakMap();
   function pass(list) {
     if (!H.on || !grid || !list || !list.length) return list;
     var hit = passMemo.get(list);
     if (hit && hit.ver === ver) return hit.out;
     var t0 = now(), n = list.length, out = new Array(n), i, k, e, p, np, st, r, top = grid.yTop + 0.6;
-    S.strands = n; S.touched = S.front = S.back = S.rest = S.neck = S.forced = S.swept = 0;
+    S.strands = n; S.touched = S.front = S.back = S.rest = S.neck = S.forced = S.swept = S.smooth = 0;
+    var mq = false; try { mq = !!(H.mqBack && MANNEQUIN.on); } catch (e2) { mq = false; }
+    S.mq = mq;
     for (i = 0; i < n; i++) {
       e = list[i]; p = e && e.pts; np = null;
       if (p && p.length > 1) {
-        st = { pref: null, drp: null };
+        st = { pref: null, drp: null, mq: mq, k0: -1 };
         for (k = 1; k < p.length; k++) {
           if (!(p[k].y < top)) continue;
           r = pushPoint(p[k], np ? np[k - 1] : p[k - 1], st);
-          if (r !== p[k]) { if (!np) np = p.slice(); np[k] = r; }
+          if (r !== p[k]) {
+            if (!np) np = p.slice(); np[k] = r;
+            if (st.k0 < 0 && st.pref === 'back' && r.z < p[k].z - H.sweepMinJump) st.k0 = k;
+          }
         }
+        if (np && st.k0 > 0 && sweepBack(np, p, st.k0)) S.smooth++;
       }
       out[i] = np ? Object.assign({}, e, { pts: np }) : e;
     }
@@ -322,7 +357,8 @@
       : '아직 못 읽음(몸통 메쉬를 불러오기 전)' + (pending ? ' · 불러오는 중' : '')) + (S.err ? ' · ⚠ ' + S.err : '');
     L = L.concat([a]);
     if (grid) L.push('  적용(직전) — 가닥 ' + S.strands + '개 중 몸통에 닿은 가닥 ' + S.touched + ' (앞으로 ' + S.front + ' / 뒤로 ' + S.back + ') · 어깨 위에 얹은 점 ' + S.rest + ' · 목 밖으로 민 점 ' + S.neck + ' · ' + Math.round(S.ms) + 'ms' +
-      (H.frontOnlyIfDraped ? ' · 앞은 사진에서 넘긴 쪽만: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')' : ' · 앞은 사진에서 넘긴 쪽만: 꺼짐'));
+      (H.frontOnlyIfDraped ? ' · 앞은 사진에서 넘긴 쪽만: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')' : ' · 앞은 사진에서 넘긴 쪽만: 꺼짐') +
+      (S.mq ? ' · 마네킹: 전부 등 쪽으로' : '') + ' · 넘어가는 자리 다듬은 가닥 ' + S.smooth);
     try {
       var R = recognize(), F = R.front;
       if (F) {
