@@ -290,6 +290,7 @@
     X.degFront = p.front ? wrapDeg(p.front.deg) : 0;
     X.baseDeg = { front: X.degFront, left: p.left ? wrapDeg(p.left.deg) : 45, right: p.right ? wrapDeg(p.right.deg) : -45, back: p.back ? wrapDeg(p.back.deg) : 180 };
     try { X.ref = measure(state.hairMasks && state.hairMasks.front); } catch (e) { X.ref = null; }
+    X.faceWasReady = X.canFace();            // 카드를 띄울 때는 분석 모델이 이미 내려가 있으므로 지금 값을 기억
     X.refFace = null;
     try { var ff = faceOf(state.landmarks && state.landmarks.front); if (ff && X.ref) X.refFace = { yaw: ff.yaw, pitch: ff.pitch, ec: ff.ecN * X.ref.h }; } catch (e) {}
     var cap = (typeof capShotDataURL === 'function') ? capShotDataURL : function (u) { return Promise.resolve(u); };
@@ -591,10 +592,11 @@
       if (fp) { add(f.deg, true, 'frame', fp); return; }
       var lm = null; try { lm = state.landmarks && state.landmarks[a]; } catch (e) {}
       var hasFace = !!(lm && typeof lm.poseYawDeg === 'number'), ys = wrapDeg(f.deg - (X.degFront || 0)) + frontYaw;
-      if (a === 'front') { if (X.canFace() && !hasFace) add(f.deg, true, 'angle', '정면 사진에서 얼굴을 못 찾음'); return; }
+      var couldFace = X.faceWasReady || X.canFace();
+      if (a === 'front') { if (couldFace && !hasFace) add(f.deg, true, 'angle', '정면 사진에서 얼굴을 못 찾음'); return; }
       if (a === 'back') return;
       if (hasFace && Math.abs(wrapDeg(lm.poseYawDeg - ys)) > X.yawTol) add(f.deg, true, 'angle', '센서 각도와 얼굴 각도가 다름(센서 ' + ys.toFixed(0) + '° · 얼굴 ' + lm.poseYawDeg.toFixed(0) + '°)');
-      else if (X.canFace() && !hasFace && Math.abs(ys) <= X.faceMustDeg) add(f.deg, true, 'angle', '얼굴이 보여야 할 각도(' + ys.toFixed(0) + '°)인데 얼굴을 못 찾음');
+      else if (couldFace && !hasFace && Math.abs(ys) <= X.faceMustDeg) add(f.deg, true, 'angle', '얼굴이 보여야 할 각도(' + ys.toFixed(0) + '°)인데 얼굴을 못 찾음');
       else if (hasFace && typeof lm.posePitchDeg === 'number' && X.refFace && X.refFace.pitch != null && Math.abs(lm.posePitchDeg - X.refFace.pitch) > X.pitchTol) add(f.deg, true, 'height', '올려다보거나 내려다본 사진');
     });
     // 추가 사진
