@@ -24,6 +24,18 @@
  *     뿌리 쪽 gripFrom 구간은 덜 움직입니다(뿌리는 두피에 붙어 있음).
  *   · [↶] = 마지막 한 획 되돌리기. 머리 모델이 바뀌면(다른 사진 · 마네킹 켬/끔 · 다시 기르기) 빗질은 지웁니다.
  *
+ * (2026-10-05b) 폰에서 써 본 뒤 — 사용자: "정확히 어떻게 써야 할지 잘 안 잡힌다. 뿌리 기준으로 건드려야 하나? 빗질은 뜬 부분·헝클어진
+ *   부분을 보고 거기를 정렬하는 것. 적용되는 구간을 정확히 알 수 있게 작은 빗 모양 하나 올려놔도 좋겠다."
+ *   실측(진단): 획 68 · 표본 904 · 바뀐 가닥 5895/10000 · 다시 그리기 426ms. 화면에서는 손가락에 가려 어디가 바뀌는지 안 보였고,
+ *   100% 근처에서는 붓(3cm 상한)이 화면에서 반지름 12px쯤이라 손가락보다 작았습니다. 빗은 자리에 잔물결(지그재그)도 생겼습니다.
+ *   ① 빗 표시 — 붓이 닿는 자리에 점선 원(= 실제로 바뀌는 범위)과 작은 빗 그림을 띄웁니다. 빗살이 가리키는 쪽 = 머리가 눕는 방향.
+ *      터치에서는 손가락에 가리지 않게 빗을 손가락 위쪽 touchOffset px에 둡니다(바뀌는 자리도 거기 — 손가락이 아니라 빗이 닿는 곳).
+ *      빗질을 켜면 화면 가운데에 빗이 먼저 보이고, 마우스는 올려놓기만 해도 따라다닙니다.
+ *   ② 잔물결 없애기 — 방향을 손가락의 직전 몇 px이 아니라 지나온 길 dirLagPx 뒤의 점에서 지금 점으로 잡고(손떨림 제거),
+ *      가닥에 적용한 뒤 이웃 마디끼리 방향을 한 번 고르게 합니다.
+ *   ③ 쓰다듬는 동안 다시 그리는 간격을 120 → 250ms(폰에서 한 번 그리는 데 0.4초라 계속 밀렸음). 손을 떼면 바로 한 번 더 그립니다.
+ *   쓰는 법: 뿌리와는 상관없습니다. 뜬 머리·헝클어진 자리에 빗(원)을 올리고, 눕히고 싶은 방향으로 쓸어 주면 원 안의 겉머리만 그 방향으로 눕습니다.
+ *
  * 아직 안 되는 것 / 알아둘 것:
  *   · 등록 스타일에는 들어가지 않습니다(이 손님 화면에서만).
  *   · 쓰다듬는 동안 머리는 liveMs마다 다시 그립니다(가닥이 많으면 반 박자 늦게 따라옴).
@@ -47,7 +59,10 @@
     spacing: 0.35,      // 붓 반지름의 이 비율만큼 움직일 때마다 표본 하나
     minMovePx: 3,
     maxSamples: 3000,
-    liveMs: 120,        // 쓰다듬는 동안 다시 그리는 간격
+    liveMs: 250,        // 쓰다듬는 동안 다시 그리는 간격
+    dirLagPx: 22,       // 방향 = 지나온 길에서 이만큼 뒤의 점 → 지금 점(손떨림 제거)
+    touchOffset: 52,    // 터치: 빗을 손가락 위쪽 이 px에 둠(손가락에 안 가리게) · 0 = 손가락 바로 아래
+    indicator: true,    // 빗 표시(점선 원 + 빗 그림)
     pickStrands: 8000   // 붓 자리 찾기에 쓰는 가닥 수 상한(넘으면 건너뛰며 씀)
   }, W.COMB3D || {});
   C.samples = [];       // {x,y,z, dx,dy,dz, r, k, g}
@@ -98,46 +113,56 @@
     for (; fDone < n; fDone++) splat(F, C.samples[fDone]);
     return n ? F : null;
   }
-  var buf = new Float64Array(3 * 256);
+  var buf = new Float64Array(4 * 256);
   function applySamples(g) {
     if (!C.enabled || !C.samples.length || !g || g.length < 2) return g;
     var f = syncField(); if (!f || !f.n) return g;
     var n = g.length, i, p, mn = f.mn, mx = f.mx, any = false;
     for (i = 0; i < n; i++) { p = g[i]; if (p.x >= mn[0] && p.x <= mx[0] && p.y >= mn[1] && p.y <= mx[1] && p.z >= mn[2] && p.z <= mx[2]) { any = true; break; } }
     if (!any) return g;
-    if (buf.length < n * 3) buf = new Float64Array(n * 3 + 96);
-    var cell = C.cell, map = f.map, V = f.V, last = n - 1, changed = false, P = buf;
-    var px = g[0].x, py = g[0].y, pz = g[0].z, nx = px, ny = py, nz = pz;
-    P[0] = px; P[1] = py; P[2] = pz;
+    if (buf.length < n * 4) buf = new Float64Array(n * 4 + 128);
+    var cell = C.cell, map = f.map, V = f.V, last = n - 1, changed = false, U = buf;          // U: 마디 i(점 i−1 → i)의 [ux,uy,uz,길이]
+    var px = g[0].x, py = g[0].y, pz = g[0].z, lo = n, hi = 0;
     for (i = 1; i < n; i++) {
       p = g[i];
-      var sx = p.x - px, sy = p.y - py, sz = p.z - pz, len = Math.sqrt(sx * sx + sy * sy + sz * sz);
+      var sx = p.x - px, sy = p.y - py, sz = p.z - pz, len = Math.sqrt(sx * sx + sy * sy + sz * sz), ux = 0, uy = -1, uz = 0;
       if (len > 1e-9) {
-        var ux = sx / len, uy = sy / len, uz = sz / len;
+        ux = sx / len; uy = sy / len; uz = sz / len;
         var a = Math.floor((p.x + px) * 0.5 / cell) + OFF, b = Math.floor((p.y + py) * 0.5 / cell) + OFF, c = Math.floor((p.z + pz) * 0.5 / cell) + OFF;
         if (a >= 0 && b >= 0 && c >= 0 && a < SPAN && b < SPAN && c < SPAN) {
           var k = map.get(a + SPAN * (b + SPAN * c));
           if (k !== undefined) {
             k *= 3;
-            var vx = V[k], vy = V[k + 1], vz = V[k + 2], w = Math.sqrt(vx * vx + vy * vy + vz * vz);
+            var vx = V[k], vy = V[k + 1], vz = V[k + 2], vl = Math.sqrt(vx * vx + vy * vy + vz * vz), w = vl;
             if (w > 0.01) {
               var t = i / last; if (t < C.gripFrom) w *= t / C.gripFrom;
               if (w > 1) w = 1;
-              var tx = ux + (vx / Math.sqrt(vx * vx + vy * vy + vz * vz) - ux) * w, ty = uy + (vy / Math.sqrt(vx * vx + vy * vy + vz * vz) - uy) * w, tz = uz + (vz / Math.sqrt(vx * vx + vy * vy + vz * vz) - uz) * w,
-                tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
-              if (tl > 1e-3) { ux = tx / tl; uy = ty / tl; uz = tz / tl; changed = true; }
+              var tx = ux + (vx / vl - ux) * w, ty = uy + (vy / vl - uy) * w, tz = uz + (vz / vl - uz) * w, tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+              if (tl > 1e-3) { ux = tx / tl; uy = ty / tl; uz = tz / tl; changed = true; if (i < lo) lo = i; if (i > hi) hi = i; }
             }
           }
         }
-        nx += ux * len; ny += uy * len; nz += uz * len;
       }
+      U[i * 4] = ux; U[i * 4 + 1] = uy; U[i * 4 + 2] = uz; U[i * 4 + 3] = len;
       px = p.x; py = p.y; pz = p.z;
-      P[i * 3] = nx; P[i * 3 + 1] = ny; P[i * 3 + 2] = nz;
     }
     if (!changed) return g;
-    var out = new Array(n);
+    // 바뀐 구간(과 그 양옆 한 마디)의 방향을 이웃끼리 한 번 고르게 — 칸마다 방향이 조금씩 달라 생기는 잔물결을 없앰
+    var out = new Array(n), s0 = Math.max(1, lo - 1), s1 = Math.min(last, hi + 1);
+    var qx = g[0].x, qy = g[0].y, qz = g[0].z, ax, ay, az, al, i0, i1;
     out[0] = g[0];
-    for (i = 1; i < n; i++) out[i] = { x: P[i * 3], y: P[i * 3 + 1], z: P[i * 3 + 2] };
+    for (i = 1; i < n; i++) {
+      ax = U[i * 4]; ay = U[i * 4 + 1]; az = U[i * 4 + 2];
+      if (i >= s0 && i <= s1) {
+        i0 = i > 1 ? i - 1 : i; i1 = i < last ? i + 1 : i;
+        ax = U[i0 * 4] + 2 * ax + U[i1 * 4]; ay = U[i0 * 4 + 1] + 2 * ay + U[i1 * 4 + 1]; az = U[i0 * 4 + 2] + 2 * az + U[i1 * 4 + 2];
+        al = Math.sqrt(ax * ax + ay * ay + az * az);
+        if (al > 1e-6) { ax /= al; ay /= al; az /= al; } else { ax = U[i * 4]; ay = U[i * 4 + 1]; az = U[i * 4 + 2]; }
+      }
+      len = U[i * 4 + 3];
+      qx += ax * len; qy += ay * len; qz += az * len;
+      out[i] = { x: qx, y: qy, z: qz };
+    }
     S._t++;
     return out;
   }
@@ -241,10 +266,26 @@
     var wait = Math.max(0, C.liveMs - (now() - liveT));
     liveTimer = setTimeout(function () { liveTimer = null; liveT = now(); redraw(); }, wait);
   }
+  /* 지나온 길에서 dirLagPx 뒤의 점 → 지금 점 = 빗질 방향(화면) */
+  function lagDir(st, x, y) {
+    var tr = st.trail, n = tr.length, acc = 0, i;
+    for (i = n - 2; i >= 0; i -= 2) {
+      acc += Math.hypot((i + 2 < n ? tr[i + 2] : x) - tr[i], (i + 3 < n ? tr[i + 3] : y) - tr[i + 1]);
+      if (acc >= C.dirLagPx) break;
+    }
+    if (i < 0) i = 0;
+    return [x - tr[i], y - tr[i + 1]];
+  }
   function addSample(x, y) {
     var st = stroke, pk = st.pk; if (!pk) return;
     var mvx = x - st.lx, mvy = y - st.ly, mv = Math.sqrt(mvx * mvx + mvy * mvy);
     if (mv < C.minMovePx) return;
+    var ld = lagDir(st, x, y);
+    st.trail.push(x, y); if (st.trail.length > 240) st.trail.splice(0, 120);
+    var ll = Math.hypot(ld[0], ld[1]) || 1;                               // 방향만(길이 1) — 직전 방향과 섞어 손떨림을 한 번 더 누름
+    if (st.vx === 0 && st.vy === 0) { st.vx = ld[0] / ll; st.vy = ld[1] / ll; }
+    else { st.vx = st.vx * 0.7 + ld[0] / ll * 0.3; st.vy = st.vy * 0.7 + ld[1] / ll * 0.3; }
+    showMark(x, y, st.has ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(st.w)) / pk.perPx(st.w) : null, Math.atan2(st.vy, st.vx));
     var i = pickAt(pk, x, y, C.pickPx), cx, cy, cz, w;
     if (i < 0) i = pickAt(pk, x, y, C.radiusPx);
     if (i >= 0) { cx = pk.PX[i]; cy = pk.PY[i]; cz = pk.PZ[i]; w = pk.SW[i]; }
@@ -252,8 +293,6 @@
       var pp = pk.perPx(st.w); cx = st.cx + (pk.right.x * mvx - pk.up.x * mvy) * pp; cy = st.cy + (pk.right.y * mvx - pk.up.y * mvy) * pp; cz = st.cz + (pk.right.z * mvx - pk.up.z * mvy) * pp; w = st.w;
     } else { st.lx = x; st.ly = y; return; }
     var r = Math.min(C.maxRadius, C.radiusPx * pk.perPx(w));
-    // 방향: 화면에서 움직인 방향(조금 고르게)
-    st.vx = st.vx * 0.5 + mvx * 0.5; st.vy = st.vy * 0.5 + mvy * 0.5;
     var dx = pk.right.x * st.vx - pk.up.x * st.vy, dy = pk.right.y * st.vx - pk.up.y * st.vy, dz = pk.right.z * st.vx - pk.up.z * st.vy, dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
     st.lx = x; st.ly = y;
     if (!(dl > 1e-9)) return;
@@ -282,17 +321,22 @@
     if (e.button !== 0 || e.shiftKey) return;        // Shift+드래그·가운데/오른쪽 버튼 = 이동(그대로)
     var pk = null; try { pk = buildPick(); } catch (x) { S.err = String(x && x.message || x); }
     if (!pk) return;
-    var rc = pk.rect;
-    stroke = { id: e.pointerId, pk: pk, lx: e.clientX - rc.left, ly: e.clientY - rc.top, vx: 0, vy: 0, has: false, n: 0, g: ++gid, cx: 0, cy: 0, cz: 0, sx: 0, sy: 0, sz: 0, w: 0 };
+    var rc = pk.rect, oy = e.pointerType === 'touch' ? C.touchOffset : 0, x0 = e.clientX - rc.left, y0 = e.clientY - rc.top - oy;
+    stroke = { id: e.pointerId, pk: pk, oy: oy, lx: x0, ly: y0, vx: 0, vy: 0, trail: [x0, y0], has: false, n: 0, g: ++gid, cx: 0, cy: 0, cz: 0, sx: 0, sy: 0, sz: 0, w: 0 };
+    var i0 = pickAt(pk, x0, y0, C.radiusPx);
+    showMark(x0, y0, i0 >= 0 ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(pk.SW[i0])) / pk.perPx(pk.SW[i0]) : null, null);
     e.stopPropagation();
   }
   function onMove(e) {
     if (ptrs.has(e.pointerId)) { var q = ptrs.get(e.pointerId); q.x = e.clientX; q.y = e.clientY; }
+    if (!stroke && C.on && !pass && e.pointerType === 'mouse' && usable() && onCanvas(e)) {      // 마우스: 올려놓기만 해도 빗이 따라다님
+      var r0 = e.target.getBoundingClientRect(); showMark(e.clientX - r0.left, e.clientY - r0.top, null, null);
+    }
     if (!stroke || e.pointerId !== stroke.id) return;
     e.stopPropagation();
-    var rc = stroke.pk.rect, ev = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
-    if (ev && ev.length > 1) { for (var i = 0; i < ev.length; i++) addSample(ev[i].clientX - rc.left, ev[i].clientY - rc.top); }
-    else addSample(e.clientX - rc.left, e.clientY - rc.top);
+    var rc = stroke.pk.rect, oy = stroke.oy, ev = (typeof e.getCoalescedEvents === 'function') ? e.getCoalescedEvents() : null;
+    if (ev && ev.length > 1) { for (var i = 0; i < ev.length; i++) addSample(ev[i].clientX - rc.left, ev[i].clientY - rc.top - oy); }
+    else addSample(e.clientX - rc.left, e.clientY - rc.top - oy);
   }
   function onUp(e) {
     ptrs.delete(e.pointerId);
@@ -303,6 +347,56 @@
   W.addEventListener('pointermove', onMove, true);
   W.addEventListener('pointerup', onUp, true);
   W.addEventListener('pointercancel', onUp, true);
+
+  /* ────────────────────────────────────────────────────────────────────────
+   * 빗 표시 — 점선 원(실제로 바뀌는 범위) + 작은 빗(빗살이 가리키는 쪽 = 머리가 눕는 방향)
+   * ────────────────────────────────────────────────────────────────────── */
+  var mark = null, markR = 14;
+  function restRadiusPx() {                 // 붓 자리를 아직 못 찾았을 때: 머리 가운데 깊이 기준
+    try {
+      var m = m3(), rect = m.renderer.domElement.getBoundingClientRect(), dist = MODEL3D_VIEW.base ? MODEL3D_VIEW.base.dist / MODEL3D_VIEW.zoom : m.camera.position.length();
+      var pp = 2 * dist * Math.tan(m.camera.fov * Math.PI / 360) / rect.height;
+      return Math.min(C.maxRadius, C.radiusPx * pp) / pp;
+    } catch (e) { return C.radiusPx; }
+  }
+  function ensureMark() {
+    var m = m3(); if (!m || !m.container || m.container.id !== 'adjust3dHost') return null;
+    if (mark && mark.parentNode === m.container) return mark;
+    mark = document.createElement('div'); mark.id = 'comb3dMark';
+    mark.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:5;pointer-events:none;display:none;';
+    mark.innerHTML = '<svg width="120" height="120" viewBox="-60 -60 120 120" style="position:absolute;left:-60px;top:-60px;overflow:visible">' +
+      '<circle id="comb3dRing" r="14" fill="rgba(201,135,74,0.10)" stroke="#fff" stroke-width="2.5" opacity="0.9"/>' +
+      '<circle id="comb3dRing2" r="14" fill="none" stroke="#c9874a" stroke-width="1.5" stroke-dasharray="4 3"/>' +
+      '<g id="comb3dGlyph"><g transform="translate(0,0)">' +
+      '<rect x="-13" y="-8" width="26" height="6" rx="2" fill="#c9874a" stroke="#1a1410" stroke-width="1"/>' +
+      [-10.5, -7, -3.5, 0, 3.5, 7, 10.5].map(function (x) { return '<rect x="' + (x - 0.9) + '" y="-2.5" width="1.8" height="10" rx="0.8" fill="#c9874a" stroke="#1a1410" stroke-width="0.6"/>'; }).join('') +
+      '</g></g></svg>';
+    m.container.appendChild(mark);
+    return mark;
+  }
+  /* (x,y) = 그림판 안 좌표 · rPx = 실제 반지름(px · null이면 직전 값) · ang = 빗질 방향(rad · null이면 아래) */
+  function showMark(x, y, rPx, ang) {
+    if (!C.indicator) return;
+    var el = ensureMark(); if (!el) return;
+    if (rPx != null && isFinite(rPx)) markR = Math.max(4, rPx);
+    el.style.display = 'block';
+    el.style.transform = 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px)';
+    try {
+      el.querySelector('#comb3dRing').setAttribute('r', markR.toFixed(1)); el.querySelector('#comb3dRing2').setAttribute('r', markR.toFixed(1));
+      // 빗살이 진행 방향을 가리키게(빗 그림은 빗살이 +y) — 화면 각도 ang에서 90° 뺌
+      var deg = ang == null ? 0 : ang * 180 / Math.PI - 90;
+      el.querySelector('#comb3dGlyph').setAttribute('transform', 'rotate(' + deg.toFixed(1) + ')');
+    } catch (e) {}
+  }
+  function hideMark() { if (mark) mark.style.display = 'none'; }
+  function restMark() {                      // 빗질을 켰을 때: 화면 가운데에 빗을 보여 둠
+    try {
+      var m = m3(); if (!m || !C.on) { hideMark(); return; }
+      var rect = m.renderer.domElement.getBoundingClientRect();
+      showMark(rect.width / 2, rect.height / 2, restRadiusPx(), null);
+    } catch (e) {}
+  }
+  C._mark = function () { return mark; };
 
   /* ────────────────────────────────────────────────────────────────────────
    * ④ 버튼
@@ -325,7 +419,11 @@
     C.on = (v == null) ? !C.on : !!v;
     if (!C.on && stroke) endStroke();
     syncBtn();
-    if (C.on) { try { showToast(lang() === 'ko' ? '결 방향으로 쓰다듬으세요 · 두 손가락: 이동·확대' : 'Stroke along the hair flow · two fingers: move / zoom'); } catch (e) {} }
+    if (C.on) {
+      restMark();
+      try { showToast(lang() === 'ko' ? '뜬 머리에 빗(원)을 올리고 눕힐 방향으로 쓸어 주세요 · 빗은 손가락 조금 위에 있어요 · 두 손가락: 이동·확대'
+        : 'Put the comb (circle) on the flyaways and sweep the way they should lie · the comb sits just above your finger · two fingers: move / zoom'); } catch (e) {}
+    } else hideMark();
   };
   try {
     var bar = document.querySelector('#screen-adjust .mode-bar'), mq = document.getElementById('mannequinBtn');
@@ -356,10 +454,16 @@
     var o = W[name]; if (typeof o !== 'function') return;
     W[name] = function () {
       var r = o.apply(this, arguments);
-      try { if (name === 'activateScreen' && arguments[0] !== 'adjust' && C.on) { C.on = false; if (stroke) endStroke(); } syncBtn(); } catch (e) {}
+      try { if (name === 'activateScreen' && arguments[0] !== 'adjust' && C.on) { C.on = false; if (stroke) endStroke(); hideMark(); } syncBtn(); } catch (e) {}
       return r;
     };
   });
+  var oApplyV = W.model3dApplyView;
+  if (typeof oApplyV === 'function') W.model3dApplyView = function () {
+    var r = oApplyV.apply(this, arguments);
+    try { if (C.on && !stroke && mark && mark.style.display !== 'none') { markR = Math.max(4, restRadiusPx()); mark.querySelector('#comb3dRing').setAttribute('r', markR.toFixed(1)); mark.querySelector('#comb3dRing2').setAttribute('r', markR.toFixed(1)); } } catch (e) {}
+    return r;
+  };
   var origRAF = W.renderAdjustFrame;
   if (typeof origRAF === 'function') W.renderAdjustFrame = function () { var r = origRAF.apply(this, arguments); try { syncBtn(); } catch (e) {} return r; };
 
@@ -372,7 +476,7 @@
     try {
       L.push(TAG + ' ' + (C.enabled ? (C.on ? '켜짐(빗질 모드)' : '대기') : '꺼짐') + ' · 획 ' + S.strokes + ' · 표본 ' + C.samples.length + '/' + C.maxSamples +
         ' · 직전에 바뀐 가닥 ' + S.touched + ' · 가닥 만들기 ' + Math.round(S.ms) + 'ms(빗질 포함) · 붓 자리 찾기 준비 ' + Math.round(S.pickMs) + 'ms(점 ' + S.pickPts + ')' +
-        ' · 방향 장 ' + (F ? F.n : 0) + '칸 · 붓 ' + C.radiusPx + 'px · 세기 ' + C.strength + (S.err ? ' · ⚠ ' + S.err : ''));
+        ' · 방향 장 ' + (F ? F.n : 0) + '칸 · 붓 ' + C.radiusPx + 'px(상한 ' + C.maxRadius + ' · 지금 화면에서 ' + Math.round(markR) + 'px) · 세기 ' + C.strength + ' · 터치 빗 위치 손가락 위 ' + C.touchOffset + 'px' + (S.err ? ' · ⚠ ' + S.err : ''));
     } catch (e) {}
     return L;
   };

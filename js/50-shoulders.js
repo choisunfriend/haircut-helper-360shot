@@ -39,6 +39,11 @@
  *      (어깨 위로 올수록 원래 자리 · 내려갈수록 등 쪽). 마네킹·원본 머리 모두 적용.
  *   되돌리기: SHOULDER.mqBack=false · SHOULDER.sweepLen=0 후 SHOULDER.refresh()
  *
+ * (2026-10-05k) 어깨 앞으로 넘기기는 끔 — 사용자: "어깨 앞으로 머리를 내려야 할 필요가 있기 전까지는 그냥 아래로 늘어뜨린 형태로.
+ *   복잡도만 높아지고 아직 스타일에 꼭 필요할 것 같진 않다. 마네킹도, 어깨 앞으로 넘긴 손님도 일괄적으로 쭉 내려오도록."
+ *   frontDrape=false(기본): 사진을 보지 않고, 마네킹·원본 머리 모두 몸통에 닿는 가닥을 전부 등 쪽으로 보냅니다(가운데 띠는 예외).
+ *   사진 인지(어깨 앞으로 넘겼는가)는 계산하지 않습니다. 다시 쓰려면 SHOULDER.frontDrape=true; SHOULDER.refresh()
+ *
  * 끄기: SHOULDER.on=false; SHOULDER.refresh()      (어깨만 끔 · 목 기둥은 REGROW.neck=false)
  * 조절: SHOULDER.margin(몸에서 띄우는 거리) · SHOULDER.restMax(이보다 얕게 걸치면 위에 얹음) 후 SHOULDER.refresh()
  * ========================================================================== */
@@ -58,7 +63,8 @@
     earSpanCm: 15,      // 귀 사이 거리(cm 환산용 어림)
     frontOnlyIfDraped: true,   // (2026-10-04i) 사진에서 어깨 앞으로 넘긴 쪽만 앞으로 — 아니면 전부 뒤로
     centerBand: 0.3,    // 가운데 띠 반폭(≈ 5.5cm) — 이 안쪽은 뒤로 보내지 않음(목을 가로지르게 됨)
-    mqBack: true,       // (2026-10-05j) 마네킹 모드는 사진과 상관없이 전부 등 쪽으로
+    frontDrape: false,  // (2026-10-05k) 어깨 앞으로 넘기기(사진 인지) — 끔: 전부 등 쪽으로 곧게
+    mqBack: true,       // (2026-10-05j) 마네킹 모드는 사진과 상관없이 전부 등 쪽으로(frontDrape를 켰을 때 쓰임)
     sweepLen: 0.45,     // 뒤로 넘어가는 자리를 가닥 길이로 이만큼(≈ 8cm) 거슬러 부드럽게 이음 · 0 = 끔
     sweepMinJump: 0.08  // 처음 뒤로 옮겨진 점이 이만큼은 움직였을 때만 다듬음
   }, W.SHOULDER || {});
@@ -250,8 +256,9 @@
     var zb = g.ZB[k], m = H.margin;
     // (2026-10-04i) 사진에서 이쪽을 어깨 앞으로 안 넘겼으면 앞에 두지 않음(가운데 띠는 예외)
     var only = H.frontOnlyIfDraped && ax >= H.centerBand;
-    if (only && !st.mq && st.drp == null) st.drp = drapedAt(q.x);
-    var noFront = only && (st.mq || !st.drp);                      // 마네킹은 넘긴 사진이어도 뒤로
+    var useDrape = H.frontDrape && !st.mq;                         // 사진에서 넘겼는지 볼 것인가
+    if (only && useDrape && st.drp == null) st.drp = drapedAt(q.x);
+    var noFront = only && (!useDrape || !st.drp);                  // 기본: 전부 뒤로
     if (!(q.z > zb - m && q.z < zf + m)) {
       // 몸통 밖 — 어깨 윗면보다 아래에서 몸통 앞에 떠 있는 점
       if (noFront && q.z >= zf + m && q.y < g.TOP[ix]) {
@@ -264,7 +271,7 @@
     if (!st.pref) {
       var mid = (zf + zb) / 2, ref = prev ? prev.z : q.z;
       if (noFront) { st.pref = 'back'; if (ref > mid) S.forced++; }
-      else if (Math.abs(ref - mid) < H.ambig) st.pref = drapedAt(q.x) ? 'front' : 'back';
+      else if (Math.abs(ref - mid) < H.ambig) st.pref = (useDrape && drapedAt(q.x)) ? 'front' : 'back';
       else st.pref = ref > mid ? 'front' : 'back';
       S.touched++; if (st.pref === 'front') S.front++; else S.back++;
     }
@@ -357,8 +364,10 @@
       : '아직 못 읽음(몸통 메쉬를 불러오기 전)' + (pending ? ' · 불러오는 중' : '')) + (S.err ? ' · ⚠ ' + S.err : '');
     L = L.concat([a]);
     if (grid) L.push('  적용(직전) — 가닥 ' + S.strands + '개 중 몸통에 닿은 가닥 ' + S.touched + ' (앞으로 ' + S.front + ' / 뒤로 ' + S.back + ') · 어깨 위에 얹은 점 ' + S.rest + ' · 목 밖으로 민 점 ' + S.neck + ' · ' + Math.round(S.ms) + 'ms' +
-      (H.frontOnlyIfDraped ? ' · 앞은 사진에서 넘긴 쪽만: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')' : ' · 앞은 사진에서 넘긴 쪽만: 꺼짐') +
-      (S.mq ? ' · 마네킹: 전부 등 쪽으로' : '') + ' · 넘어가는 자리 다듬은 가닥 ' + S.smooth);
+      (!H.frontDrape ? ' · 어깨 앞으로 넘기기 꺼짐 — 전부 등 쪽으로: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')'
+        : H.frontOnlyIfDraped ? ' · 앞은 사진에서 넘긴 쪽만: 앞에 있었지만 뒤로 보낸 가닥 ' + S.forced + ' (어깨 앞에 떠 있던 점 ' + S.swept + ')' + (S.mq ? ' · 마네킹: 전부 등 쪽으로' : '') : ' · 앞은 사진에서 넘긴 쪽만: 꺼짐') +
+      ' · 넘어가는 자리 다듬은 가닥 ' + S.smooth);
+    if (!H.frontDrape) return L;                       // 사진 인지는 안 씀(계산도 안 함)
     try {
       var R = recognize(), F = R.front;
       if (F) {
@@ -371,5 +380,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 몸통 메쉬에서 어깨를 읽어 머리카락이 몸통을 뚫지 않게 하고, 사진에서 어깨 앞으로 넘긴 머리를 인지합니다. 끄기 SHOULDER.on=false 후 SHOULDER.refresh()');
+  console.log(TAG + ' 설치 — 몸통 메쉬에서 어깨를 읽어 머리카락이 몸통을 뚫지 않게 합니다(전부 등 쪽으로 · 어깨 앞으로 넘기기는 SHOULDER.frontDrape=true로 켬). 끄기 SHOULDER.on=false 후 SHOULDER.refresh()');
 })();
