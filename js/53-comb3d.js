@@ -71,6 +71,20 @@
  *     윤곽 밖으로 삐죽 나온 잔머리(정면에서 가장자리를 쓸어내림): 결에서 벗어난 각 중앙 89° → 6~10°.
  *   끄기: COMB3D.grain=false(손가락 방향 그대로) · COMB3D.collide=false 후 COMB3D.refresh()
  *
+ * (2026-10-05f) 다듬을수록 더 흐트러지던 것 — 사용자(영상·진단): "comb 테스트 중인데 머리를 다듬을수록 더 흐트러진다."
+ *   진단: 획 11 · 표본 217 · 바뀐 가닥 6102/9999(제 무리의 결로 본 마디 37,866). 영상: 가장자리를 쓸 때마다 가닥이 몸통과 나란히 윤곽 밖에 떠서 남고, 더 빗으면 더 늘어남.
+ *   원인 ① 몸통 머리까지 돌렸습니다. 실제 머리는 다발이 비스듬히 엇갈려(굽이) 결에서 tolFrom° 넘게 벗어난 마디가 많은데, 그 마디만 골라 돌리면
+ *          나갔다 돌아오던 균형이 깨져 그 아래 꼬리가 통째로 옆으로 밀립니다. 밀린 가닥은 결과는 나란해서 다시 빗어도 안 들어갑니다.
+ *          재현(합성 머리 29,000가닥 · 굽이 있음 · 영상과 같은 동작 33획): 0.2cm 넘게 옮겨진 가닥 6,976 · 윤곽 밖에 그려진 가닥 길이 1,323 → 1,655cm
+ *          (굽이를 1.8배로 하면 1,443 → 14,241cm). 굽이가 없는 매끈한 머리(예전 합성 테스트)에서는 안 나타났습니다.
+ *        ② 50번(어깨)이 몸통에 닿은 가닥에 "빗기 전 자리"(_pre)를 안 달아서, 안 빗은 가닥은 어깨에 얹힌 뒤 자리로, 빗은 가닥은 얹히기 전 자리로 결·붓 자리를 읽었습니다.
+ *   지금: · flyOnly — 몸통 머리 속 마디는 안 돌립니다. 몸통 밖으로 뜬 구간(주변 3×3×3칸 가닥 수가 적은 자리)만 결 쪽으로 돌립니다.
+ *         · anchor — 빗기 전 자리가 몸통 속이던 점은 밀려도 anchorLen 안에 제자리로 돌아옵니다(잔머리 꼬리는 안 붙듦 → 그대로 눕음).
+ *         · pullIn — 붓이 닿은 마디가 몸통 밖에 떠 있으면 몸통 쪽으로 조금 기울입니다(결과 나란한 채 떠 있는 가닥도 붙음).
+ *         · 50번: 몸통에 닿은 가닥에 언제나 _pre(어깨 전 자리)를 답니다.
+ *   같은 테스트: 옮겨진 가닥 664 · 윤곽 밖 길이 1,323 → 856cm(굽이 1.8배: 1,443 → 1,024cm) · 획을 더할수록 줄어듦.
+ *   대신: 몸통 겉면에 붙어서 엇갈린 다발은 이제 빗어도 안 펴집니다(예전 동작: COMB3D.flyOnly=false). 붙들기 끄기: COMB3D.anchor=false 후 COMB3D.refresh()
+ *
  * 아직 안 되는 것 / 알아둘 것:
  *   · 등록 스타일에는 들어가지 않습니다(이 손님 화면에서만).
  *   · 쓰다듬는 동안 머리는 liveMs마다 다시 그립니다(가닥이 많으면 반 박자 늦게 따라옴).
@@ -117,11 +131,17 @@
     flowReach: 3,       // 주변에 머리가 없으면(겉면 밖으로 멀리 뜬 꼬리) 두상 쪽으로 이 칸 수까지 들어가며 결을 찾음 · 그래도 없으면 손가락 방향
     tolFrom: 12, tolFull: 28,  // 도: 가닥의 큰 방향이 목표에서 이 안쪽으로만 벗어나 있으면 안 건드림 · 이 이상이면 세기만큼 돌림(사이는 서서히)
     collide: true,      // 빗은 가닥이 두상·목 안으로 못 들어가게
+    // (2026-10-05f) 몸통 머리는 제자리에 — 빗은 뒤 아래쪽이 통째로 밀려 윤곽 밖으로 나가던 것을 막음(머리말 f 참고)
+    anchor: true,
+    flyOnly: true,      // 몸통 밖으로 뜬 구간(잔머리)만 돌림 — 몸통 속 마디는 결에서 벗어나 있어도 그대로(끄면 몸통의 엇갈린 다발도 펴지만 아래쪽이 밀림)
+    anchorLen: 0.13,    // 밀린 가닥이 제자리로 돌아오는 길이(모델 단위 ≈ 2.5cm) — 짧을수록 단단히 붙듦
+    bodyFull: 8,        // 주변(3×3×3칸) 가닥 수가 보통 칸의 이 배수면 "몸통 머리 속"(flowNear배 이하는 몸통 밖 = 잔머리 · 사이는 서서히)
+    pullIn: 0.3,        // 몸통 밖에 뜬 채로 빗긴 마디를 몸통 쪽으로 기울이는 정도(≈ 17°) · 0 = 끔
     headLift: 1.02,     // 두피 타원체의 이 배수 껍질 밖에 둠(42번 다시 기르기와 같은 값)
     pickStrands: 8000   // 붓 자리 찾기에 쓰는 가닥 수 상한(넘으면 건너뛰며 씀)
   }, W.COMB3D || {});
   C.samples = [];       // {dabs: Float32Array[x,y,z,w …], m, dx,dy,dz, k, g}
-  var S = C.stats = { strokes: 0, touched: 0, _t: 0, ms: 0, pickMs: 0, pickPts: 0, dabs: 0, seen: 0, tOwn: 0, tSide: 0, tAll: 0, tReach: 0, tFinger: 0, tSkip: 0, _to: 0, _ts: 0, _ta: 0, _tr: 0, _tf: 0, _tk: 0, pushed: 0, neck: 0, _pu: 0, _nk: 0, flowRef: 0, flowCells: 0, flowMs: 0, err: null };
+  var S = C.stats = { strokes: 0, touched: 0, _t: 0, ms: 0, pickMs: 0, pickPts: 0, dabs: 0, seen: 0, tOwn: 0, tSide: 0, tAll: 0, tReach: 0, tFinger: 0, tSkip: 0, _to: 0, _ts: 0, _ta: 0, _tr: 0, _tf: 0, _tk: 0, pushed: 0, neck: 0, _pu: 0, _nk: 0, anch: 0, pin: 0, _an: 0, _pi: 0, flowRef: 0, flowCells: 0, flowMs: 0, err: null };
   var ver = 0, gid = 0, modelRef = null;
 
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
@@ -185,11 +205,18 @@
     headAt = t; headKey = key;
     return headMemo || null;
   }
-  var buf = new Float64Array(4 * 256), rbuf = new Float64Array(3 * 256);
+  var buf = new Float64Array(4 * 256), rbuf = new Float64Array(3 * 256), wbuf = new Float64Array(256);
   var DEG = Math.PI / 180;
   /* 그 자리에서 이 가닥이 따를 결 → GT(길이 1). 제 칸과 이웃 칸(3×3×3)의 머리를 봄.
      돌려주는 값: 1 = 제 무리(이 가닥과 같은 쪽으로 흐르는 이웃) · 2 = 손가락 쪽으로 흐르는 이웃 · 3 = 이웃 전체 · 0 = 주변에 머리가 없음 · −1 = 결이 갈려 정할 수 없음
      (s = 이 가닥의 큰 방향 · f = 손가락 방향 · cOwn/cFin = 같은 쪽으로 치는 각의 cos) */
+  /* (2026-10-05f) 그 자리가 몸통 머리 속인가: 0 = 밖(잔머리 자리) … 1 = 속 */
+  function bodyAt(fw, x, y, z) {
+    var a = Math.floor((x - fw.x0) * fw.inv), b = Math.floor((y - fw.y0) * fw.inv), c = Math.floor((z - fw.z0) * fw.inv);
+    if (a < 0 || b < 0 || c < 0 || a >= fw.nx || b >= fw.ny || c >= fw.nz) return 0;
+    var v = (fw.GA[a + fw.nx * (b + fw.ny * c)] - fw.bLo) / (fw.bHi - fw.bLo);
+    return v <= 0 ? 0 : v >= 1 ? 1 : v * v * (3 - 2 * v);
+  }
   var GT = new Float64Array(3);
   function grainAt(fw, x, y, z, sx, sy, sz, fx, fy, fz, cOwn, cFin) {
     var ci = Math.floor((x - fw.x0) * fw.inv), cj = Math.floor((y - fw.y0) * fw.inv), ck = Math.floor((z - fw.z0) * fw.inv), a, b, c, o, gn, gm, gx, gy, gz, l;
@@ -219,7 +246,7 @@
     var n = g.length, i, p, mn = f.mn, mx = f.mx, any = false;
     for (i = 0; i < n; i++) { p = g[i]; if (p.x >= mn[0] && p.x <= mx[0] && p.y >= mn[1] && p.y <= mx[1] && p.z >= mn[2] && p.z <= mx[2]) { any = true; break; } }
     if (!any) return g;
-    if (buf.length < n * 4) { buf = new Float64Array(n * 4 + 128); rbuf = new Float64Array(n * 3 + 96); }
+    if (buf.length < n * 4) { buf = new Float64Array(n * 4 + 128); rbuf = new Float64Array(n * 3 + 96); wbuf = new Float64Array(n + 32); }
     var cell = C.cell, map = f.map, V = f.V, last = n - 1, changed = false, U = buf, R = rbuf;          // U: 마디 i(점 i−1 → i)의 [ux,uy,uz,길이] · R: 그 마디를 돌릴 회전(축×각)
     var px = g[0].x, py = g[0].y, pz = g[0].z, lo = n, hi = 0, L = 0, len, sx, sy, sz, sl;
     // ① 마디 방향·길이
@@ -237,10 +264,11 @@
     var A, B, q0, a, b, c, k, vx, vy, vz, vl, w, t, tx, ty, tz, dot, th, fr, ang, cx, cy, cz, cl, ax, ay, az;
     // 결 격자(붓을 댈 때 빗기 전 가닥들로 만들어 둔 것). 없으면(grain=false) 손가락 방향이 그대로 목표.
     var FW = (C.grain && flowMemo && flowMemo.flow) ? flowMemo.flow : null, HD0 = null, code, hh, mpx, mpy, mpz, o0, gnn, gmm, reach = Math.max(0, C.flowReach | 0);
+    var WB = wbuf, AFW = (C.anchor && flowMemo && flowMemo.flow && flowMemo.flow.GA) ? flowMemo.flow : null;
     var cT0 = Math.cos(t0), cOwn = Math.cos(C.flowOwn * DEG), cFin = Math.cos(C.flowFinger * DEG), yCap = 0.45;
     if (FW) { HD0 = headShape(); yCap = (HD0 ? HD0.cy : 0.15) + 0.3; }
     for (i = 1; i < n; i++) {
-      R[i * 3] = 0; R[i * 3 + 1] = 0; R[i * 3 + 2] = 0;
+      R[i * 3] = 0; R[i * 3 + 1] = 0; R[i * 3 + 2] = 0; WB[i] = 0;
       if (!(U[i * 4 + 3] > 1e-9)) continue;
       p = g[i]; q0 = g[i - 1];
       a = Math.floor((p.x + q0.x) * 0.5 / cell) + OFF; b = Math.floor((p.y + q0.y) * 0.5 / cell) + OFF; c = Math.floor((p.z + q0.z) * 0.5 / cell) + OFF;
@@ -251,6 +279,9 @@
       if (!(w > 0.01)) continue;
       t = i / last; if (t < C.gripFrom) w *= t / C.gripFrom;
       if (w > 1) w = 1;
+      if (AFW && C.flyOnly) { w *= 1 - bodyAt(AFW, (p.x + q0.x) * 0.5, (p.y + q0.y) * 0.5, (p.z + q0.z) * 0.5); if (!(w > 0.01)) continue; }   // 몸통 머리 속 마디는 안 돌림 — 몸통 밖으로 뜬 구간만
+      WB[i] = w;
+      if (AFW && C.pullIn > 0 && bodyAt(AFW, p.x, p.y, p.z) < 0.5) { changed = true; if (i < lo) lo = i; if (i > hi) hi = i; }   // 몸통 밖에 뜬 마디 — 결과 나란해도 몸통 쪽으로 붙임
       // 큰 방향 = 뒤쪽 현(i−1−hw → i) · 앞쪽 현(i−1 → i+hw) · 가운데 현 중 이 마디와 가장 나란한 것.
       //   가운데 현만 쓰면 잔머리가 꺾여 나가는 자리에서 꺾이기 전(몸통)과 후(삐죽 나온 꼬리)가 섞여, 몸통 쪽은 괜히 돌고 꼬리는 덜 돕니다.
       A = g[i - 1 - hw < 0 ? 0 : i - 1 - hw]; B = g[i + hw > last ? last : i + hw];
@@ -325,6 +356,41 @@
         }
       }
       ex = qx + ax * len; ey = qy + ay * len; ez = qz + az * len;
+      if (AFW && len > 1e-9) {
+        // (2026-10-05f) ⓐ 붙들기 — 빗기 전 자리가 몸통 속이던 점은 제자리 쪽으로 되돌림.
+        //    두상 바깥쪽(겉으로 뜨는) 성분은 언제나, 옆으로 밀린 성분은 새 자리가 몸통을 벗어날 때만. 잔머리(몸통 밖이던 점)는 붙들지 않음 → 그대로 눕음.
+        o = g[i]; var e0x = ex - o.x, e0y = ey - o.y, e0z = ez - o.z, e02 = e0x * e0x + e0y * e0y + e0z * e0z, bo = 0, bn = 1;
+        if (e02 > 1e-10) {
+          bo = bodyAt(AFW, o.x, o.y, o.z);
+          if (bo > 0) {
+            var kap = len / (C.anchorLen > 0.01 ? C.anchorLen : 0.13); if (kap > 0.5) kap = 0.5; kap *= bo;
+            nx = o.x; ny = o.y > yCap ? o.y - yCap : 0; nz = o.z; nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (nl > 1e-9) { nx /= nl; ny /= nl; nz /= nl; } else { nx = 0; ny = 1; nz = 0; }
+            bn = bodyAt(AFW, ex, ey, ez);
+            var en = e0x * nx + e0y * ny + e0z * nz, kt = kap * (1 - bn), ktU = C.flyOnly ? kap : (WB[i] > 0.01 ? kt : Math.max(kt, kap * 0.5));   // 붓이 안 닿은 구간은 옆으로 밀린 것도 서서히 제자리로
+            var cxx = -(en * nx * kap + (e0x - en * nx) * ktU), cyy = -(en * ny * kap + (e0y - en * ny) * ktU), czz = -(en * nz * kap + (e0z - en * nz) * ktU);
+            var cmag = Math.sqrt(cxx * cxx + cyy * cyy + czz * czz), cmax = 0.5 * len; if (cmag > cmax) { cxx *= cmax / cmag; cyy *= cmax / cmag; czz *= cmax / cmag; }
+            tx = ex + cxx - qx; ty = ey + cyy - qy; tz = ez + czz - qz; sl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+            if (sl > 1e-9) { ex = qx + tx / sl * len; ey = qy + ty / sl * len; ez = qz + tz / sl * len; S._an++; }
+          }
+        }
+        // ⓑ 몸통 쪽으로 — 붓이 닿은 마디가 몸통 밖에 떠 있고, 두상 쪽으로 flowReach칸 안에 몸통이 있으면 그쪽으로 기울임(나란히 뜬 채 남지 않게)
+        if (C.pullIn > 0 && WB[i] > 0.01 && bo < 0.5) {
+          bn = bodyAt(AFW, ex, ey, ez);
+          if (bn < 1) {
+            nx = -ex; ny = ey > yCap ? yCap - ey : 0; nz = -ez; nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (nl > 1e-6) {
+              nx /= nl; ny /= nl; nz /= nl; var found = false, hq;
+              for (hq = 1; hq <= reach + 1; hq++) if (bodyAt(AFW, ex + nx * AFW.fc * hq, ey + ny * AFW.fc * hq, ez + nz * AFW.fc * hq) >= 0.5) { found = true; break; }
+              if (found) {
+                var pk2 = C.pullIn * WB[i] * (1 - bn);
+                tx = (ex - qx) / len + nx * pk2; ty = (ey - qy) / len + ny * pk2; tz = (ez - qz) / len + nz * pk2; sl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                if (sl > 1e-9) { ex = qx + tx / sl * len; ey = qy + ty / sl * len; ez = qz + tz / sl * len; S._pi++; }
+              }
+            }
+          }
+        }
+      }
       if (HD && len > 1e-9) {
         o = g[i]; yy = o.y - hcy;
         fl = Math.sqrt(o.x * o.x / a2 + yy * yy / b2 + o.z * o.z / c2); if (fl > lift) fl = lift;
@@ -392,7 +458,7 @@
   }
   var origCA = W.computeAdjustedHair3DStrands;
   if (typeof origCA === 'function') W.computeAdjustedHair3DStrands = function () {
-    try { checkModel(); S._t = 0; S._pu = 0; S._nk = 0; S._to = S._ts = S._ta = S._tr = S._tf = S._tk = 0; } catch (e) {}
+    try { checkModel(); S._t = 0; S._pu = 0; S._nk = 0; S._an = 0; S._pi = 0; S._to = S._ts = S._ta = S._tr = S._tf = S._tk = 0; } catch (e) {}
     var t0 = now(), out = origCA.apply(this, arguments);
     try {                                                                 // 빗질이 있는데 머리 모양(길이·컬 등)이 바뀌었으면 결을 다시 읽어 둠(전체 목록을 만든 호출에서만)
       if (C.grain && C.samples.length && out && out.length && !arguments[0] && !(arguments[1] > 1) && modelRef) {
@@ -400,7 +466,7 @@
         if (fmB && fmB !== flowMemo && typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump();      // 방금 목록은 옛 결로 만든 것 → 다음 호출에서 새로
       }
     } catch (eF) {}
-    if (S._t > 0 || S._tk > 0) { S.touched = S._t; S.ms = now() - t0; S.pushed = S._pu; S.neck = S._nk; S.tOwn = S._to; S.tSide = S._ts; S.tAll = S._ta; S.tReach = S._tr; S.tFinger = S._tf; S.tSkip = S._tk; }          // 캐시에서 나온 호출은 세지 않음
+    if (S._t > 0 || S._tk > 0) { S.touched = S._t; S.ms = now() - t0; S.pushed = S._pu; S.neck = S._nk; S.anch = S._an; S.pin = S._pi; S.tOwn = S._to; S.tSide = S._ts; S.tAll = S._ta; S.tReach = S._tr; S.tFinger = S._tf; S.tSkip = S._tk; }          // 캐시에서 나온 호출은 세지 않음
     return out;
   };
   // 서명 — 빗질이 바뀌면 미리 만든 헤어도 다시
@@ -477,7 +543,13 @@
         for (k = 0; k < gv.length; k++) { ga += gv[k]; if (ga * 2 >= gs) { ref = gv[k]; break; } }
         var mn = Math.max(6, Math.round(C.flowMin * Math.min(1, used / 8000)));
         var GM = new Float32Array(nn); for (k = 0; k < nn; k++) if (GN[k]) GM[k] = Math.sqrt(GX[k] * GX[k] + GY[k] * GY[k] + GZ[k] * GZ[k]);
-        flow = { fc: fc, inv: inv, x0: b0x, y0: b0y, z0: b0z, nx: nx, ny: ny, nz: nz, GX: GX, GY: GY, GZ: GZ, GN: GN, GM: GM, ref: ref, cells: gv.length, dense: Math.max(2, C.flowDense * ref), near: Math.max(mn, C.flowNear * ref) };
+        // (2026-10-05f) 몸통 격자: 칸마다 이웃 3×3×3칸의 가닥 수(축마다 한 번씩 더함)
+        var GA = new Float32Array(nn), GT2 = new Float32Array(nn), ia, ib, ic, oo, sm;
+        for (ic = 0; ic < nz; ic++) for (ib = 0; ib < ny; ib++) for (ia = 0; ia < nx; ia++) { oo = ia + nx * (ib + ny * ic); sm = GN[oo]; if (ia > 0) sm += GN[oo - 1]; if (ia < nx - 1) sm += GN[oo + 1]; GT2[oo] = sm; }
+        for (ic = 0; ic < nz; ic++) for (ib = 0; ib < ny; ib++) for (ia = 0; ia < nx; ia++) { oo = ia + nx * (ib + ny * ic); sm = GT2[oo]; if (ib > 0) sm += GT2[oo - nx]; if (ib < ny - 1) sm += GT2[oo + nx]; GA[oo] = sm; }
+        for (ic = 0; ic < nz; ic++) for (ib = 0; ib < ny; ib++) for (ia = 0; ia < nx; ia++) { oo = ia + nx * (ib + ny * ic); sm = GA[oo]; if (ic > 0) sm += GA[oo - nx * ny]; if (ic < nz - 1) sm += GA[oo + nx * ny]; GT2[oo] = sm; }
+        var nearV = Math.max(mn, C.flowNear * ref);
+        flow = { fc: fc, inv: inv, x0: b0x, y0: b0y, z0: b0z, nx: nx, ny: ny, nz: nz, GX: GX, GY: GY, GZ: GZ, GN: GN, GM: GM, GA: GT2, bLo: nearV, bHi: Math.max(nearV * 1.5, C.bodyFull * ref), ref: ref, cells: gv.length, dense: Math.max(2, C.flowDense * ref), near: nearV };
       }
     }
     flowMemo = { fp: fp, model: model, flow: flow };
@@ -790,7 +862,8 @@
         ' · 방향 장 ' + (F ? F.n : 0) + '칸 · 붓 ' + C.radiusPx + 'px(상한 ' + C.maxRadius + ' · 지금 화면에서 ' + Math.round(markR) + 'px) · 세기 ' + C.strength + ' · 터치 빗 위치 손가락 위 ' + C.touchOffset + 'px' + (S.err ? ' · ⚠ ' + S.err : ''));
       L.push('  결 따라 빗기 ' + (C.grain ? (flowMemo && flowMemo.flow ? '켜짐 — 결 칸 ' + S.flowCells + ' · 몸통 머리 보통 밀도 칸당 ' + S.flowRef + '가닥 · 결 읽기 ' + Math.round(S.flowMs) + 'ms' : '켜짐(아직 결을 안 읽음 — 빗을 대면 읽음)') : '꺼짐(손가락 방향 그대로)') +
         ' · 직전에 본 마디의 목표: 제 무리의 결 ' + S.tOwn + ' / 손가락 쪽 이웃의 결 ' + S.tSide + ' / 이웃 전체의 결 ' + S.tAll + ' / 두상 쪽에서 찾은 결 ' + S.tReach + ' / 손가락 방향(주변에 머리 없음) ' + S.tFinger + ' / 결이 갈려 그대로 둠 ' + S.tSkip +
-        ' · 허용 각 ' + C.tolFrom + '~' + C.tolFull + '° · ' + (C.collide ? '두상에 막혀 눕힌 마디 ' + S.pushed + ' / 목 밖으로 민 점 ' + S.neck : '두상 막기 꺼짐'));
+        ' · 허용 각 ' + C.tolFrom + '~' + C.tolFull + '° · ' + (C.collide ? '두상에 막혀 눕힌 마디 ' + S.pushed + ' / 목 밖으로 민 점 ' + S.neck : '두상 막기 꺼짐') +
+        ' · ' + (C.anchor ? '몸통 붙들기 켜짐 — 제자리로 되돌린 점 ' + S.anch + ' / 몸통 쪽으로 기울인 마디 ' + S.pin : '몸통 붙들기 꺼짐'));
     } catch (e) {}
     return L;
   };
