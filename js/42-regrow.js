@@ -100,6 +100,12 @@
  *   지금: curlRadius=false — 컬 값만 사진에서 재고 웨이브는 50(10/4에 컬로 보이던 상태). 반경은 재서 진단에만 찍습니다.
  *   다시 켜기: REGROW.curlRadius=true (실제 엔진에 맞춘 환산을 새로 만들기 전에는 권하지 않음)
  *
+ *   (2026-10-06q) 컬 굵기 적용은 다시 켰습니다(curlRadius=true) — 사용자가 결 정렬만 끄고(굵기는 켠 채) 컬이 돌아온 것을 확인.
+ *   (2026-10-06p) 그런데 굵기를 끈 것만으로는 부족했습니다 — 사용자: "REGROW.align=false로 하니까 돌아왔어."
+ *     v7 결 정렬이 곱슬 사진의 뼈대를 나란히 펴 버린 것입니다(이 사진: 돌린 가닥 28,334 · 돌린 각 중앙값 23.8°. 직모 손님은 6.4°).
+ *     곱슬머리의 뼈대는 일부러 엇갈려 있고 그 엇갈림이 컬의 부피를 만듭니다. → 사진에서 잰 컬이 alignCurlOff(40) 이상이면 정렬을 안 하고,
+ *     그 아래는 세기를 비례해서 줄입니다.
+ *
  * v7 (2026-10-05m) 기른 뒤 결 정렬 — 사용자: "머리는 결이 중요하다. 일부러 삐죽하게 하지 않는 이상 주변 머리와 한 방향으로 나란히 정렬된다.
  *   일일이 빗질하기 전에, 사진에서 읽힌 결과 일반적인 결 방향을 참고해서 방향을 잡아 둘 수 없나?"
  *   다시 기르기는 가닥을 하나씩 따로 길러서, 한 가닥이 결을 잘못 읽으면 그 가닥만 혼자 튑니다(이웃을 보지 않음).
@@ -144,7 +150,7 @@
     curlMinN: 20,               // 뷰의 표본 수가 이보다 많아야 믿음
     curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
-    curlRadius: false,          // (2026-10-06n) 끔 — 10/4 방식(웨이브 50 고정)으로 되돌림. 머리말 v8 참고
+    curlRadius: true,           // (2026-10-06q) 다시 켬 — 컬이 죽던 원인은 굵기가 아니라 결 정렬이었음(사용자: "align=false만 했어. 굵기 적용 다시 해봐")
     curlRk: 5, curlR0: 3.3,     // 컬 반경(px) = curlRk × (dHalf − curlR0)  (⚠ 합성 타래 무늬로 맞춘 어림)
     curlRminPx: 5,              // 이보다 작게는 구분 못 함(결 방향장의 창 크기)
     curlRodScaleMax: 3,         // 로드 최대를 넘길 수 있는 배수 상한
@@ -168,6 +174,7 @@
     alignReach: 3,      // 제 칸에 기준이 없으면 두상 쪽으로 이 칸 수까지 들어가며 이웃 결을 찾음(겉면 밖으로 뜬 잔머리)
     alignRoot: 0.15, alignRootFade: 0.1,   // 뿌리에서 이 길이(≈ 2.7cm)까지는 안 돌리고, 그 뒤 이 길이에 걸쳐 서서히(뿌리 볼륨을 눕히지 않게)
     strayTrim: true, strayMax: 1, strayMinSeg: 4, strayKeep: 1,   // 혼자 나간 꼬리 자르기
+    alignCurlOff: 40,   // (2026-10-06p) 사진에서 잰 컬이 이 값 이상이면 결 정렬을 안 함(0~이 값 사이는 세기를 비례해서 줄임) · 0 = 컬과 무관하게 정렬
     // (2026-10-04g) 목 — 늘어뜨린 가닥이 목(과 그 아래 몸통 기둥) 안으로 못 들어가게. 화면에 보이는 목과 같은 치수.
     neck: true, neckMargin: 1.1,
     sliceMs: 30,
@@ -630,7 +637,9 @@
       },
       finish: function () {
         var cm = 1; try { cm = modelCmPerUnit() || 1; } catch (e) {}
-        var al = null; try { al = G.alignStrands(out, CY); } catch (e) { console.warn(TAG + ' 결 정렬 실패(그대로 둠)', e); }
+        // (2026-10-06p) 곱슬머리는 결 정렬을 약하게/안 함 — 곱슬 사진의 뼈대는 일부러 엇갈려 있고, 나란히 펴면 컬이 죽어 보임(사용자: "align=false로 하니까 돌아왔어")
+        var alK = 1; try { var pcA = G.photoCurl(); if (pcA && pcA.raw > 0 && G.alignCurlOff > 0) alK = clampN(1 - pcA.raw / G.alignCurlOff, 0, 1); } catch (e) { alK = 1; }
+        var al = null; try { al = G.alignStrands(out, CY, alK); } catch (e) { console.warn(TAG + ' 결 정렬 실패(그대로 둠)', e); }
         var tv = []; for (var k = 0; k < NC; k++) if (known[k] === 1 && !offScalp(k)) tv.push(T[k] * cm);
         S = G.stats = {
           ms: Math.round(now() - t0), n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
@@ -640,7 +649,7 @@
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
           cams: cams.map(function (c) { return c.angle; }).join(','),
           neckPush: st.neckPush, backFix: !!G.backFix, backN: st.backN, backFwd: st.backFwd, backKeep: st.backKeep, backLenMed: q(st.backLen, 0.5) * cm,
-          align: al ? { on: al.on, strands: al.strands, segs: al.segs, rotMed: q(al.rot, 0.5), rotP90: q(al.rot, 0.9), trimmed: al.trimmed, trimCm: al.trimmed ? al.trimLen / al.trimmed * cm : 0, cells: al.cells, ms: Math.round(al.ms) } : null,
+          align: al ? { on: al.on, skipped: !!al.skipped, kMul: al.kMul, strands: al.strands, segs: al.segs, rotMed: q(al.rot, 0.5), rotP90: q(al.rot, 0.9), trimmed: al.trimmed, trimCm: al.trimmed ? al.trimLen / al.trimmed * cm : 0, cells: al.cells, ms: Math.round(al.ms) } : null,
           backTipN: backTips.length, backTipCm: backTipOK ? (yTop - q(backTips, 0.5)) * cm : NaN,
           hang: !!hangTips, hangSrc: hangTips ? (hangTips === backTips ? '뒤 사진 가닥' : '전체 사진 가닥') : '', hangN: st.hangN, hangSteps: st.hangSteps, stopTip: st.stopTip,
           hangTipCm: hangTips ? [(yTop - q(hangTips, 0.75)) * cm, (yTop - q(hangTips, 0.25)) * cm] : null
@@ -788,9 +797,10 @@
       !(sty.part) && !(sty.flow) && !(sty.sleek);
   }
   /* ── (v7) 기른 뒤 결 정렬 ───────────────────────────────────────────────── */
-  G.alignStrands = function (strands, CY) {
-    var st = { on: !!G.align, strands: 0, segs: 0, rot: [], trimmed: 0, trimLen: 0, cells: 0, ms: 0 };
+  G.alignStrands = function (strands, CY, kMul) {
+    var st = { on: !!G.align, strands: 0, segs: 0, rot: [], trimmed: 0, trimLen: 0, cells: 0, ms: 0, kMul: kMul == null ? 1 : kMul };
     if (!G.align || !strands || !strands.length) return st;
+    if (kMul != null && !(kMul > 0.01)) { st.skipped = true; return st; }      // 곱슬머리 — 정렬 안 함
     var t0 = now(), cell = G.alignCell, OFFA = 512, SP = 1024, map = new Map(), cap = 8192, nC = 0;
     var SX = new Float32Array(cap), SY = new Float32Array(cap), SZ = new Float32Array(cap), CN = new Float32Array(cap), NS = new Uint16Array(cap), LAST = new Int32Array(cap).fill(-1);
     function grow() { var c2 = cap * 2, a; a = new Float32Array(c2); a.set(SX); SX = a; a = new Float32Array(c2); a.set(SY); SY = a; a = new Float32Array(c2); a.set(SZ); SZ = a;
@@ -832,7 +842,7 @@
       }
     }
     st.cells = nC;
-    var cTol = Math.cos(G.alignTol * Math.PI / 180), cFull = Math.cos(G.alignFull * Math.PI / 180), cFlip = Math.cos(G.alignFlip * Math.PI / 180), K = G.alignK;
+    var cTol = Math.cos(G.alignTol * Math.PI / 180), cFull = Math.cos(G.alignFull * Math.PI / 180), cFlip = Math.cos(G.alignFlip * Math.PI / 180), K = G.alignK * (kMul == null ? 1 : Math.min(1, kMul));
     var U = new Float64Array(4 * 256), alone = new Uint8Array(256);
     // ② 벗어난 마디 돌리기 ③ 혼자 나간 꼬리
     for (si = 0; si < strands.length; si++) {
@@ -1321,7 +1331,7 @@
       (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
     L.push('  곧게 늘어뜨리기(긴 머리 · 목 아래): ' + (!G.hangDown ? '꺼짐' : !s.isLong ? '짧은 머리라 안 씀' : !s.hang ? '끝 높이를 낼 사진 가닥이 모자라 안 씀' :
       '켜짐 — 곧게 내린 가닥 ' + s.hangN + '개(' + s.hangSteps + '걸음) · 끝 높이에서 멈춤 ' + s.stopTip + ' · 끝 높이 = 정수리에서 ' + n1(s.hangTipCm[0]) + '~' + n1(s.hangTipCm[1]) + 'cm 아래(' + s.hangSrc + '의 25~75%)'));
-    L.push('  결 정렬(기른 뒤): ' + (!s.align || !s.align.on ? '꺼짐' : '켜짐 — 이웃 결에서 벗어나 돌린 가닥 ' + s.align.strands + '개(마디 ' + s.align.segs + '개 · 돌린 각 중앙값 ' + n1(s.align.rotMed) + '° / p90 ' + n1(s.align.rotP90) +
+    L.push('  결 정렬(기른 뒤): ' + (!s.align || !s.align.on ? '꺼짐' : s.align.skipped ? '곱슬머리라 안 함(잰 컬이 ' + G.alignCurlOff + ' 이상 · REGROW.alignCurlOff=0이면 컬과 무관하게 정렬)' : '켜짐' + (s.align.kMul < 0.999 ? '(컬이 있어 세기 ×' + s.align.kMul.toFixed(2) + ')' : '') + ' — 이웃 결에서 벗어나 돌린 가닥 ' + s.align.strands + '개(마디 ' + s.align.segs + '개 · 돌린 각 중앙값 ' + n1(s.align.rotMed) + '° / p90 ' + n1(s.align.rotP90) +
       '°) · 혼자 나간 꼬리 자름 ' + s.align.trimmed + '개(평균 ' + n1(s.align.trimCm) + 'cm) · 칸 ' + s.align.cells + ' · ' + s.align.ms + 'ms'));
     L.push('  목: ' + (G.neck ? '켜짐 — 목 안으로 들어가려던 걸음 ' + (s.neckPush || 0) + '회 밖으로 밀어냄' : '꺼짐'));
     L.push('  두께(두피→머리 겉면) 중앙값 ' + n1(s.tMed) + 'cm · p90 ' + n1(s.tP90) + 'cm · 윤곽선으로 잰 칸 ' + s.tMeasured + ' · 이웃으로 메운 칸(추정) ' + s.tFilled + ' · 두께 0으로 잰 칸 ' + s.tZero + ' / 전체 ' + s.cells);
