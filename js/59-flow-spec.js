@@ -31,6 +31,25 @@
  *   · 빗질(53번)한 것은 스펙에 안 들어갑니다(지금처럼 그 화면에서만).
  *   · 이미 등록해 둔 스타일에는 표가 없습니다 — 원본 머리에서 다시 등록해야 들어갑니다.
  *
+ * (2026-10-07b) 앞쪽 머리가 흩어지던 것 — 사용자(폰 영상·진단): "분명 마네킹 모드가 적용은 됐어. 그런데 앞쪽 머리 흩어짐 손봐야겠네."
+ *   영상: 얼굴 앞(볼·눈 옆)에 곧게 내려오는 가닥 몇 개 · 턱 밑 목 앞을 가로지르는 가닥 뭉치. 실루엣·가르마는 원본대로.
+ *   진단: 표 502칸(갈린 칸 57) · 102KB · 표로 다시 만든 가닥 ↔ 원래 가닥 1.3cm(중앙값) / 5.1cm(90%) · 얼굴 가림 front 23/1518(예전 1,362/1,527) ·
+ *        50번(어깨)이 목 밖으로 민 점 2,632(다시 기른 가닥일 때는 6) = 표로 만든 길이 목 기둥을 지나고 있었음.
+ *   원인(합성 머리로 재현한 것 — 실제 가닥을 한 올씩 추적한 것은 아님): 표가 칸마다 "평균 방향"이었습니다.
+ *     처음에는 같이 가다가 얼굴·목 양쪽으로 갈라지는 가닥들을 평균 내면 가운데(= 얼굴 앞 · 목 속)로 가는 길이 됩니다.
+ *     처음 4cm의 방향만 보고 무리를 갈랐기 때문에, 나중에 갈라지는 칸은 한 무리로 남았습니다. 평균 방향을 이어 걸으면 자리도 조금씩 밀립니다.
+ *     재현(앞쪽 가운데 가닥이 3cm 같이 가다 양옆으로 갈라지는 합성 머리 · 원본에서 얼굴 앞을 지나는 가닥 135/20,000):
+ *       평균 표 649/30,000 → 지금 90/30,000. 표로 다시 만든 가닥 ↔ 원래 가닥도 0.93 → 0.81cm(잔머리 아닌 가닥 중앙값).
+ *   지금:
+ *     · 본보기 가닥 — 칸(무리)마다 평균이 아니라 "실제로 있는 가닥 하나"의 길을 저장합니다(길이가 무리의 중간 이상이고, 가는 쪽이 무리 평균과
+ *       가장 닮은 가닥). 실제 길이라 얼굴·목을 뚫지 않고, 양쪽의 평균이 아닙니다. 본보기보다 긴 구간만 닮은 가닥들의 평균으로 잇습니다.
+ *     · 무리 가르기 — 가는 쪽을 뿌리에서 세 자리(≈ 4 · 11 · 26cm)에서 봅니다. 나중에 갈라지는 칸도 두 무리가 됩니다.
+ *     · 이웃 칸과 섞기 — 길이 칸마다, 이웃 칸의 방향이 제 칸 방향과 35° 안일 때만 섞습니다(갈라지는 자리에서 가운데로 평균 내지 않음).
+ *     · 목 — 걷는 동안 목 기둥 속으로 들어가는 점은 그 자리에서 밖으로(42번 neckPush) 옮기고 거기서 이어 걷습니다
+ *       (나중에 50번이 한 점씩 밀어내면 가로로 지그재그가 됨). 끄기 FLOW_SPEC.guardNeck=false
+ *     · 표 형식이 v2로 바뀜(무리마다 끝 쪽 방향 3바이트 추가). 오늘 아침에 v1로 저장한 스타일도 그대로 풀립니다(다만 평균 표라 흩어짐은 그대로 —
+ *       원본 머리에서 다시 등록해야 새 표가 들어갑니다).
+ *
  * 확인한 것(합성 머리 — 가운데·옆 가르마 · 앞쪽만 짧은 긴 직모 · 잔머리 12%):
  *   · 표 만들기 → 싣기 → 풀기 → 같은/큰/작은 두상에 걸기: 두피 속 점 0 · 가르마를 건너가는 가닥 0 · 끝 높이(두상 높이 대비) 두상 크기와 무관하게 같음.
  *   · 실제 앱 코드를 브라우저에 올려서(사진 모델·다시 기른 모델은 지어낸 것): 스타일 걸기(applyStyleSpecAndRender → 앱이 직접 만든 마네킹 29,999가닥)에서
@@ -50,15 +69,16 @@
     cs: 0.14,            // 두피 칸(두상으로 나눈 좌표 · 0.14 ≈ 1cm)
     bin: 0.08,           // 길이 칸(같은 좌표 · ≈ 0.6~0.9cm)
     maxBins: 72,         // 길이 칸 상한(≈ 60cm)
-    early: 0.35,         // 가닥이 "어느 쪽으로 가는가"를 보는 길이(뿌리에서 · ≈ 4cm)
+    early: 0.35, mid: 1.0, late: 2.4,   // 가닥이 "어느 쪽으로 가는가"를 보는 세 자리(뿌리에서 ≈ 4 · 11 · 26cm — 가닥이 짧으면 끝)
     minCell: 3,          // 한 칸에 가닥이 이만큼은 있어야 표로 씀
     splitCoh: 0.8,       // 칸 안 가닥들의 방향 모임(0~1)이 이보다 낮으면 두 무리로 갈라 봄
     splitAngle: 50,      // 도: 두 무리의 방향이 이만큼은 벌어져야 가름
     splitMinShare: 0.2,  // 작은 무리가 이 비율은 돼야 가름
-    trim: 45,            // 도: 칸 평균을 다시 낼 때 첫 평균에서 이 안쪽인 마디만
     step: 0.05,          // 뼈대를 걸을 때 한 걸음(같은 좌표) — 가닥이 길면 maxPts에 맞춰 넓어짐
     minPts: 6, maxPts: 28,
-    matchDot: 0.5,       // 이웃 칸의 무리가 제 무리와 이만큼(cos)은 같은 쪽이어야 섞음
+    matchDot: 0.5,       // 이웃 칸의 무리가 제 무리와 이만큼(cos · 처음과 끝 쪽 평균)은 같은 쪽이어야 섞음
+    binGate: 0.82,       // 길이 칸마다: 이웃 칸의 방향이 제 칸 방향과 이만큼(cos ≈ 35°)은 같아야 그 칸에서 섞음 — 양쪽으로 갈라지는 자리에서 가운데로 평균 내지 않게
+    guardNeck: true,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
     fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
   }, W.FLOW_SPEC || {});
   var ST = FS.stats = { built: null, shaped: 0, fallback: 0, err: null, saveWarn: null };
@@ -75,88 +95,97 @@
   function buildTable(strands, E, CY, cfg) {
     cfg = cfg || FS;
     var cs = cfg.cs, bin = cfg.bin, NBmax = cfg.maxBins | 0, n = strands.length, recs = [], cells = new Map(), si, i;
-    var ia = 1 / E.a, ib = 1 / E.b, ic = 1 / E.c, cTrim = Math.cos(cfg.trim * Math.PI / 180), maxLen = 0;
+    var ia = 1 / E.a, ib = 1 / E.b, ic = 1 / E.c, maxLen = 0, A1 = cfg.early, A2 = cfg.mid, A3 = cfg.late;
     for (si = 0; si < n; si++) {
       var p = strands[si] && strands[si].pts; if (!p || p.length < 3) continue;
       var m = p.length, N = new Float32Array(m * 3);
       for (i = 0; i < m; i++) { N[i * 3] = p[i].x * ia; N[i * 3 + 1] = (p[i].y - CY) * ib; N[i * 3 + 2] = p[i].z * ic; }
       var rl = Math.sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]); if (!(rl > 0.2)) continue;
       var ux = N[0] / rl, uy = N[1] / rl, uz = N[2] / rl, ix = Math.floor(ux / cs), iy = Math.floor(uy / cs), iz = Math.floor(uz / cs);
-      // 길이 · 이른 방향(뿌리에서 early만큼 간 자리까지의 방향)
-      var len = 0, ex = 0, ey = 0, ez = 0, got = false, dx, dy, dz, l;
+      // 길이 · 가는 쪽(뿌리에서 early / mid / late만큼 간 자리까지의 방향 — 가닥이 짧으면 끝까지)
+      var len = 0, F = new Float32Array(9), g1 = false, g2 = false, g3 = false, dx, dy, dz, l, k;
       for (i = 1; i < m; i++) {
         dx = N[i * 3] - N[i * 3 - 3]; dy = N[i * 3 + 1] - N[i * 3 - 2]; dz = N[i * 3 + 2] - N[i * 3 - 1]; l = Math.sqrt(dx * dx + dy * dy + dz * dz); len += l;
-        if (!got && len >= cfg.early) { ex = N[i * 3] - N[0]; ey = N[i * 3 + 1] - N[1]; ez = N[i * 3 + 2] - N[2]; got = true; }
+        if (!g1 && len >= A1) { F[0] = N[i * 3] - N[0]; F[1] = N[i * 3 + 1] - N[1]; F[2] = N[i * 3 + 2] - N[2]; g1 = true; }
+        if (!g2 && len >= A2) { F[3] = N[i * 3] - N[0]; F[4] = N[i * 3 + 1] - N[1]; F[5] = N[i * 3 + 2] - N[2]; g2 = true; }
+        if (!g3 && len >= A3) { F[6] = N[i * 3] - N[0]; F[7] = N[i * 3 + 1] - N[1]; F[8] = N[i * 3 + 2] - N[2]; g3 = true; }
       }
       if (!(len > bin * 0.5)) continue;
-      if (!got) { ex = N[m * 3 - 3] - N[0]; ey = N[m * 3 - 2] - N[1]; ez = N[m * 3 - 1] - N[2]; }
-      l = Math.sqrt(ex * ex + ey * ey + ez * ez); if (!(l > 1e-6)) continue;
-      var rec = { N: N, m: m, len: len, ex: ex / l, ey: ey / l, ez: ez / l, ox: ux - (ix + 0.5) * cs, oy: uy - (iy + 0.5) * cs, oz: uz - (iz + 0.5) * cs, cl: 0 };
-      var k = keyOf(ix, iy, iz), c = cells.get(k);
-      if (!c) { c = { ix: ix, iy: iy, iz: iz, recs: [] }; cells.set(k, c); }
+      var tx = N[m * 3 - 3] - N[0], ty = N[m * 3 - 2] - N[1], tz = N[m * 3 - 1] - N[2];
+      if (!g1) { F[0] = tx; F[1] = ty; F[2] = tz; } if (!g2) { F[3] = tx; F[4] = ty; F[5] = tz; } if (!g3) { F[6] = tx; F[7] = ty; F[8] = tz; }
+      var okF = true;
+      for (k = 0; k < 3; k++) { l = Math.sqrt(F[k * 3] * F[k * 3] + F[k * 3 + 1] * F[k * 3 + 1] + F[k * 3 + 2] * F[k * 3 + 2]); if (!(l > 1e-6)) { okF = false; break; } F[k * 3] /= l; F[k * 3 + 1] /= l; F[k * 3 + 2] /= l; }
+      if (!okF) continue;
+      var rec = { N: N, m: m, len: len, F: F, ox: ux - (ix + 0.5) * cs, oy: uy - (iy + 0.5) * cs, oz: uz - (iz + 0.5) * cs, cl: 0 };
+      var key = keyOf(ix, iy, iz), c = cells.get(key);
+      if (!c) { c = { ix: ix, iy: iy, iz: iz, recs: [] }; cells.set(key, c); }
       c.recs.push(rec); recs.push(rec); if (len > maxLen) maxLen = len;
     }
-    var nb = Math.max(2, Math.min(NBmax, Math.ceil(maxLen / bin))), out = [], nSplit = 0, nUsed = 0, nSkipCell = 0;
+    function fdot(a, b) { var s = 0, k; for (k = 0; k < 9; k++) s += a[k] * b[k]; return s / 3; }
+    function fmean(R) {                                                      // 세 구간 방향을 따로 평균해 각각 길이 1로 · coh = 세 평균 벡터 길이의 평균
+      var M = new Float32Array(9), j, k, l, coh = 0;
+      for (j = 0; j < R.length; j++) for (k = 0; k < 9; k++) M[k] += R[j].F[k];
+      for (k = 0; k < 3; k++) { l = Math.sqrt(M[k * 3] * M[k * 3] + M[k * 3 + 1] * M[k * 3 + 1] + M[k * 3 + 2] * M[k * 3 + 2]); coh += l / R.length; if (l > 1e-6) { M[k * 3] /= l; M[k * 3 + 1] /= l; M[k * 3 + 2] /= l; } }
+      return { M: M, coh: coh / 3 };
+    }
+    var nb = Math.max(2, Math.min(NBmax, Math.ceil(maxLen / bin))), out = [], nSplit = 0, nUsed = 0, nSkipCell = 0, cSplit = Math.cos(cfg.splitAngle * Math.PI / 180);
+    var D = new Float32Array(nb * 4), X = new Float32Array(nb * 4);
     cells.forEach(function (c) {
-      var R = c.recs, nr = R.length, j, r;
+      var R = c.recs, nr = R.length, j, r, k;
       if (nr < cfg.minCell) { nSkipCell++; return; }
-      // 갈리는 칸인가
-      var sx = 0, sy = 0, sz = 0; for (j = 0; j < nr; j++) { sx += R[j].ex; sy += R[j].ey; sz += R[j].ez; }
-      var coh = Math.sqrt(sx * sx + sy * sy + sz * sz) / nr, groups = [R];
-      if (coh < cfg.splitCoh && nr >= 2 * cfg.minCell) {
-        var sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1, mx = sx / sl, my = sy / sl, mz = sz / sl, a = R[0], b = R[0], best = 2, d;
-        for (j = 0; j < nr; j++) { d = R[j].ex * mx + R[j].ey * my + R[j].ez * mz; if (d < best) { best = d; a = R[j]; } }
-        best = 2; for (j = 0; j < nr; j++) { d = R[j].ex * a.ex + R[j].ey * a.ey + R[j].ez * a.ez; if (d < best) { best = d; b = R[j]; } }
-        var A = [a.ex, a.ey, a.ez], B = [b.ex, b.ey, b.ez], it, na, nbb, ax, ay, az, bx, by, bz, al, bl;
+      // 갈리는 칸인가 — 가는 쪽(세 구간)이 두 무리로 나뉘는가
+      var fm = fmean(R), groups = [R];
+      if (fm.coh < cfg.splitCoh && nr >= 2 * cfg.minCell) {
+        var a = R[0], b = R[0], best = 9, d;
+        for (j = 0; j < nr; j++) { d = fdot(R[j].F, fm.M); if (d < best) { best = d; a = R[j]; } }
+        best = 9; for (j = 0; j < nr; j++) { d = fdot(R[j].F, a.F); if (d < best) { best = d; b = R[j]; } }
+        var CA = a.F, CB = b.F, it, GA, GB, mA, mB;
         for (it = 0; it < 6; it++) {
-          ax = ay = az = bx = by = bz = 0; na = nbb = 0;
-          for (j = 0; j < nr; j++) {
-            r = R[j];
-            if (r.ex * A[0] + r.ey * A[1] + r.ez * A[2] >= r.ex * B[0] + r.ey * B[1] + r.ez * B[2]) { r.cl = 0; ax += r.ex; ay += r.ey; az += r.ez; na++; }
-            else { r.cl = 1; bx += r.ex; by += r.ey; bz += r.ez; nbb++; }
-          }
-          al = Math.sqrt(ax * ax + ay * ay + az * az); bl = Math.sqrt(bx * bx + by * by + bz * bz);
-          if (!(al > 1e-6) || !(bl > 1e-6)) break;
-          A = [ax / al, ay / al, az / al]; B = [bx / bl, by / bl, bz / bl];
+          GA = []; GB = [];
+          for (j = 0; j < nr; j++) { r = R[j]; if (fdot(r.F, CA) >= fdot(r.F, CB)) { r.cl = 0; GA.push(r); } else { r.cl = 1; GB.push(r); } }
+          if (!GA.length || !GB.length) break;
+          mA = fmean(GA); mB = fmean(GB); CA = mA.M; CB = mB.M;
         }
-        var cosAB = A[0] * B[0] + A[1] * B[1] + A[2] * B[2];
-        if (na >= cfg.minCell && nbb >= cfg.minCell && Math.min(na, nbb) / nr >= cfg.splitMinShare && cosAB <= Math.cos(cfg.splitAngle * Math.PI / 180)) {
-          groups = [R.filter(function (q) { return q.cl === 0; }), R.filter(function (q) { return q.cl === 1; })]; nSplit++;
-        } else for (j = 0; j < nr; j++) R[j].cl = 0;
+        var minStage = 2;
+        for (k = 0; k < 3; k++) { d = CA[k * 3] * CB[k * 3] + CA[k * 3 + 1] * CB[k * 3 + 1] + CA[k * 3 + 2] * CB[k * 3 + 2]; if (d < minStage) minStage = d; }
+        if (GA && GB && GA.length >= cfg.minCell && GB.length >= cfg.minCell && Math.min(GA.length, GB.length) / nr >= cfg.splitMinShare && minStage <= cSplit) { groups = [GA, GB]; nSplit++; }
+        else for (j = 0; j < nr; j++) R[j].cl = 0;
       }
       var cell = { ix: c.ix, iy: c.iy, iz: c.iz, cl: [] };
       groups.forEach(function (Gr) {
-        var gn = Gr.length, D0 = new Float32Array(nb * 4), D1 = new Float32Array(nb * 4), pass, j2, r2, i2, b0, b1, bb, arc, dx, dy, dz, l, o, rx, ry, rz, rn;
-        for (pass = 0; pass < 2; pass++) {
-          var D = pass ? D1 : D0;
-          for (j2 = 0; j2 < gn; j2++) {
-            r2 = Gr[j2]; arc = 0;
-            for (i2 = 1; i2 < r2.m; i2++) {
-              dx = r2.N[i2 * 3] - r2.N[i2 * 3 - 3]; dy = r2.N[i2 * 3 + 1] - r2.N[i2 * 3 - 2]; dz = r2.N[i2 * 3 + 2] - r2.N[i2 * 3 - 1]; l = Math.sqrt(dx * dx + dy * dy + dz * dz);
-              if (!(l > 1e-9)) continue;
-              dx /= l; dy /= l; dz /= l;
-              b0 = Math.min(nb - 1, Math.floor(arc / bin)); arc += l; b1 = Math.min(nb - 1, Math.floor((arc - 1e-9) / bin));
-              for (bb = b0; bb <= b1; bb++) {
-                o = bb * 4;
-                if (pass) { rx = D0[o]; ry = D0[o + 1]; rz = D0[o + 2]; rn = Math.sqrt(rx * rx + ry * ry + rz * rz); if (D0[o + 3] >= 3 && rn > 1e-6 && (dx * rx + dy * ry + dz * rz) / rn < cTrim) continue; }
-                D[o] += dx; D[o + 1] += dy; D[o + 2] += dz; D[o + 3] += 1;
-              }
-            }
+        var gn = Gr.length, j2, r2, i2, b0, b1, bb, arc, dx, dy, dz, l, o, lens = [], gm = fmean(Gr).M;
+        for (j2 = 0; j2 < gn; j2++) lens.push(Gr[j2].len);
+        var q = [qv(lens, 0.1), qv(lens, 0.3), qv(lens, 0.5), qv(lens, 0.7), qv(lens, 0.9)];
+        // 본보기 가닥: 길이가 무리의 중간 이상인 가닥 가운데, 가는 쪽이 무리 평균과 가장 닮은 가닥(실제로 있는 길 — 얼굴·목을 뚫지 않고, 양쪽 평균이 아님)
+        var ex = null, bestD = -9, dd;
+        for (j2 = 0; j2 < gn; j2++) { r2 = Gr[j2]; if (r2.len < q[2] - 1e-6) continue; dd = fdot(r2.F, gm); if (dd > bestD) { bestD = dd; ex = r2; } }
+        if (!ex) return;
+        for (o = 0; o < nb * 4; o++) { D[o] = 0; X[o] = 0; }
+        function acc(rr, T) {
+          var a2 = 0, i3, x2, y2, z2, l2, c0, c1, c2, oo;
+          for (i3 = 1; i3 < rr.m; i3++) {
+            x2 = rr.N[i3 * 3] - rr.N[i3 * 3 - 3]; y2 = rr.N[i3 * 3 + 1] - rr.N[i3 * 3 - 2]; z2 = rr.N[i3 * 3 + 2] - rr.N[i3 * 3 - 1]; l2 = Math.sqrt(x2 * x2 + y2 * y2 + z2 * z2);
+            if (!(l2 > 1e-9)) continue;
+            c0 = Math.min(nb - 1, Math.floor(a2 / bin)); a2 += l2; c1 = Math.min(nb - 1, Math.floor((a2 - 1e-9) / bin));
+            for (c2 = c0; c2 <= c1; c2++) { oo = c2 * 4; T[oo] += x2; T[oo + 1] += y2; T[oo + 2] += z2; T[oo + 3] += 1; }
           }
         }
-        // 길이 칸: 다듬은 평균(없으면 첫 평균) · 가닥이 minKeep개도 안 남은 칸에서 끊음
-        var minKeep = gn >= 8 ? 2 : 1, dirs = [], nbn = 0, ex = 0, ey = 0, ez = 0, ox = 0, oy = 0, oz = 0, lens = [];
-        for (bb = 0; bb < nb; bb++) {
-          o = bb * 4; if (!(D0[o + 3] >= minKeep)) break;
-          var useT = D1[o + 3] >= 1, vx = useT ? D1[o] : D0[o], vy = useT ? D1[o + 1] : D0[o + 1], vz = useT ? D1[o + 2] : D0[o + 2], vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
-          if (!(vl > 1e-6)) { vx = D0[o]; vy = D0[o + 1]; vz = D0[o + 2]; vl = Math.sqrt(vx * vx + vy * vy + vz * vz); }
-          if (!(vl > 1e-6)) { if (nbn) { vx = dirs[nbn * 3 - 3]; vy = dirs[nbn * 3 - 2]; vz = dirs[nbn * 3 - 1]; vl = 1; } else break; }
-          dirs.push(vx / vl, vy / vl, vz / vl); nbn++;
+        acc(ex, X);
+        for (j2 = 0; j2 < gn; j2++) if (Gr[j2] !== ex && fdot(Gr[j2].F, gm) >= 0.7) acc(Gr[j2], D);   // 본보기보다 긴 구간을 이어 줄 무리 평균(닮은 가닥만)
+        var need = Math.min(nb, Math.ceil(q[4] / bin) + 1), dirs = [], nbn = 0, vx, vy, vz, vl, lx = 0, ly = -1, lz = 0;
+        for (bb = 0; bb < need; bb++) {
+          o = bb * 4; vx = X[o]; vy = X[o + 1]; vz = X[o + 2]; vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          if (!(X[o + 3] >= 1) || !(vl > 1e-6)) {                                   // 본보기가 여기까지 안 옴 — 무리 평균이 직전 방향과 60° 안이면 그것, 아니면 직전 방향 그대로
+            vx = D[o]; vy = D[o + 1]; vz = D[o + 2]; vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
+            if (!(D[o + 3] >= 2) || !(vl > 1e-6) || (nbn && (vx * lx + vy * ly + vz * lz) / vl < 0.5)) { if (!nbn) break; vx = lx; vy = ly; vz = lz; vl = 1; }
+          }
+          lx = vx / vl; ly = vy / vl; lz = vz / vl; dirs.push(lx, ly, lz); nbn++;
         }
         if (!nbn) return;
-        for (j2 = 0; j2 < gn; j2++) { r2 = Gr[j2]; ex += r2.ex; ey += r2.ey; ez += r2.ez; ox += r2.ox; oy += r2.oy; oz += r2.oz; lens.push(Math.min(r2.len, nbn * bin)); }
-        l = Math.sqrt(ex * ex + ey * ey + ez * ez) || 1;
-        cell.cl.push({ n: gn, e: [ex / l, ey / l, ez / l], rc: [ox / gn, oy / gn, oz / gn], q: [qv(lens, 0.1), qv(lens, 0.3), qv(lens, 0.5), qv(lens, 0.7), qv(lens, 0.9)], nbn: nbn, d: dirs });
+        var ox = 0, oy = 0, oz = 0;
+        for (j2 = 0; j2 < gn; j2++) { r2 = Gr[j2]; ox += r2.ox; oy += r2.oy; oz += r2.oz; }
+        for (k = 0; k < 5; k++) q[k] = Math.min(q[k], nbn * bin);
+        cell.cl.push({ n: gn, e: [gm[0], gm[1], gm[2]], e2: [gm[6], gm[7], gm[8]], rc: [ox / gn, oy / gn, oz / gn], q: q, nbn: nbn, d: dirs });
         nUsed += gn;
       });
       if (cell.cl.length) out.push(cell);
@@ -165,14 +194,14 @@
   }
 
   /* ------------------------------------------------------------------------------------------------------------
-   * 싣기 / 풀기 — 무리 하나 = [ix,iy,iz, 무리번호|무리수<<1, n, e×3, rc×3, q×5, nbn, 방향 nbn×3] (전부 1바이트)
+   * 싣기 / 풀기 — 무리 하나 = [ix,iy,iz, 무리번호|무리수<<1, n, e×3, e2×3, rc×3, q×5, nbn, 방향 nbn×3] (전부 1바이트 · v1에는 e2가 없음)
    * ---------------------------------------------------------------------------------------------------------- */
   function c8(v) { v = Math.round(v * 127); return v < -127 ? -127 : v > 127 ? 127 : v; }
   function b64(u8) { var s = '', i, CH = 0x8000; for (i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
   function unb64(s) { var b = atob(s), u = new Uint8Array(b.length), i; for (i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
   function encode(t) {
     var lmax = 0, tot = 0, nrec = 0;
-    t.cells.forEach(function (c) { c.cl.forEach(function (g) { if (g.q[4] > lmax) lmax = g.q[4]; tot += 17 + g.nbn * 3; nrec++; }); });
+    t.cells.forEach(function (c) { c.cl.forEach(function (g) { if (g.q[4] > lmax) lmax = g.q[4]; tot += 20 + g.nbn * 3; nrec++; }); });
     if (!(lmax > 0)) lmax = t.bin;
     var u = new Uint8Array(tot), I = new Int8Array(u.buffer), o = 0;
     t.cells.forEach(function (c) {
@@ -180,22 +209,24 @@
         var k;
         I[o++] = c.ix; I[o++] = c.iy; I[o++] = c.iz; u[o++] = gi | (c.cl.length << 1); u[o++] = Math.min(255, g.n);
         for (k = 0; k < 3; k++) I[o++] = c8(g.e[k]);
+        for (k = 0; k < 3; k++) I[o++] = c8(g.e2[k]);
         for (k = 0; k < 3; k++) I[o++] = c8(g.rc[k] / t.cs);
         for (k = 0; k < 5; k++) u[o++] = Math.max(0, Math.min(255, Math.round(g.q[k] / lmax * 255)));
         u[o++] = g.nbn;
         for (k = 0; k < g.nbn * 3; k++) I[o++] = c8(g.d[k]);
       });
     });
-    return { v: 1, cs: t.cs, bin: t.bin, lmax: +lmax.toFixed(4), n: nrec, d: b64(u) };
+    return { v: 2, cs: t.cs, bin: t.bin, lmax: +lmax.toFixed(4), n: nrec, d: b64(u) };
   }
   var RT = (typeof WeakMap === 'function') ? new WeakMap() : null, RTs = { s: null, t: null };
   function decode(f) {
-    if (!f || f.v !== 1 || typeof f.d !== 'string') return null;
+    if (!f || (f.v !== 1 && f.v !== 2) || typeof f.d !== 'string') return null;
     var hit = RT ? RT.get(f) : null; if (hit) return hit;
     if (RTs.s === f.d) { if (RT) RT.set(f, RTs.t); return RTs.t; }        // 같은 표를 복사한 스펙(JSON 복제)
-    var u = unb64(f.d), I = new Int8Array(u.buffer), o = 0, map = new Map(), k, nrec = 0;
-    while (o + 17 <= u.length) {
+    var u = unb64(f.d), I = new Int8Array(u.buffer), o = 0, map = new Map(), k, nrec = 0, HD = f.v >= 2 ? 20 : 17;
+    while (o + HD <= u.length) {
       var ix = I[o++], iy = I[o++], iz = I[o++], fl = u[o++], n = u[o++], e = [I[o++] / 127, I[o++] / 127, I[o++] / 127];
+      var e2 = f.v >= 2 ? [I[o++] / 127, I[o++] / 127, I[o++] / 127] : e;
       var rc = [I[o++] / 127 * f.cs, I[o++] / 127 * f.cs, I[o++] / 127 * f.cs], q = new Float32Array(5);
       for (k = 0; k < 5; k++) q[k] = u[o++] / 255 * f.lmax;
       var nbn = u[o++]; if (o + nbn * 3 > u.length) break;
@@ -203,7 +234,7 @@
       for (k = 0; k < nbn; k++) { d[k * 3] = I[o++]; d[k * 3 + 1] = I[o++]; d[k * 3 + 2] = I[o++]; l = Math.sqrt(d[k * 3] * d[k * 3] + d[k * 3 + 1] * d[k * 3 + 1] + d[k * 3 + 2] * d[k * 3 + 2]) || 1; d[k * 3] /= l; d[k * 3 + 1] /= l; d[k * 3 + 2] /= l; }
       var key = keyOf(ix, iy, iz), c = map.get(key);
       if (!c) { c = { ix: ix, iy: iy, iz: iz, cl: [] }; map.set(key, c); }
-      c.cl[fl & 1] = { n: n, e: e, rc: rc, q: q, nbn: nbn, d: d }; nrec++;
+      c.cl[fl & 1] = { n: n, e: e, e2: e2, rc: rc, q: q, nbn: nbn, d: d }; nrec++;
     }
     map.forEach(function (c) { c.cl = c.cl.filter(Boolean); });
     var t = { cs: f.cs, bin: f.bin, lmax: f.lmax, map: map, n: nrec };
@@ -227,7 +258,7 @@
     return h < A.n / (A.n + B.n) ? A : B;                                 // 섞여 있음 — 비율대로
   }
   function quant(q, h) { var f = (h < 0 ? 0 : h > 1 ? 1 : h) * 4, i = Math.min(3, Math.floor(f)), t = f - i; return q[i] + (q[i + 1] - q[i]) * t; }
-  function shape(root, h, t, E, CY, lenOver, cfg) {
+  function shape(root, h, t, E, CY, lenOver, cfg, guard) {
     cfg = cfg || FS;
     var cs = t.cs, bin = t.bin, nx = root.x / E.a, ny = (root.y - CY) / E.b, nz = root.z / E.c, rl = Math.sqrt(nx * nx + ny * ny + nz * nz);
     if (!(rl > 0.2)) return null;
@@ -249,15 +280,22 @@
         if (!home) return null;
       }
     }
-    var H = pickCluster(home, ux - (home.ix + 0.5) * cs, uy - (home.iy + 0.5) * cs, uz - (home.iz + 0.5) * cs, h, cs), e = H.e, nC = 0, wsum = 0, g, j, dt, bdot;
+    var H = pickCluster(home, ux - (home.ix + 0.5) * cs, uy - (home.iy + 0.5) * cs, uz - (home.iz + 0.5) * cs, h, cs), e = H.e, e2 = H.e2, nC = 0, wsum = 0, g, j, dt, bdot, iH = 0;
     for (k = 0; k < 8; k++) {
       dx = k & 1; dy = (k >> 1) & 1; dz = (k >> 2) & 1; c = t.map.get(keyOf(x0 + dx, y0 + dy, z0 + dz)); if (!c) continue;
       w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz); if (!(w > 1e-4)) continue;
-      if (c === home) g = H;
-      else { g = null; bdot = cfg.matchDot; for (j = 0; j < c.cl.length; j++) { dt = c.cl[j].e[0] * e[0] + c.cl[j].e[1] * e[1] + c.cl[j].e[2] * e[2]; if (dt >= bdot) { bdot = dt; g = c.cl[j]; } } if (!g) continue; }
+      if (c === home) { g = H; iH = nC; }
+      else {
+        g = null; bdot = cfg.matchDot;
+        for (j = 0; j < c.cl.length; j++) {
+          var cj = c.cl[j]; dt = 0.5 * (cj.e[0] * e[0] + cj.e[1] * e[1] + cj.e[2] * e[2] + cj.e2[0] * e2[0] + cj.e2[1] * e2[1] + cj.e2[2] * e2[2]);
+          if (dt >= bdot && cj.e2[0] * e2[0] + cj.e2[1] * e2[1] + cj.e2[2] * e2[2] >= 0.3) { bdot = dt; g = cj; }
+        }
+        if (!g) continue;
+      }
       w *= Math.min(1, g.n / 6); _C[nC] = c; _G[nC] = g; _Wt[nC] = w; wsum += w; nC++;
     }
-    if (!nC || !(wsum > 1e-6)) { _G[0] = H; _Wt[0] = 1; wsum = 1; nC = 1; }
+    if (!nC || !(wsum > 1e-6) || _G[iH] !== H) { _G[0] = H; _Wt[0] = 1; wsum = 1; nC = 1; iH = 0; }
     var len = 0;
     if (lenOver > 0) len = lenOver; else { for (i = 0; i < nC; i++) len += _Wt[i] * quant(_G[i].q, h); len /= wsum; }
     if (!(len > 1e-4)) return null;
@@ -266,17 +304,26 @@
     out[0] = { x: root.x, y: root.y, z: root.z };
     for (k = 0; k < n; k++) {
       s = (k + 0.5) * ds; fb = s / bin - 0.5; b0 = Math.floor(fb); tt = fb - b0; if (b0 < 0) { b0 = 0; tt = 0; }
-      ax = ay = az = 0;
+      // 제 칸(제 무리)의 방향을 먼저 — 이웃 칸은 이 자리에서 방향이 binGate 안으로 같을 때만 섞음
+      g = H; d = g.d; bA = b0 < g.nbn ? b0 : g.nbn - 1; bB = b0 + 1 < g.nbn ? b0 + 1 : g.nbn - 1; w = _Wt[iH];
+      var qx = d[bA * 3] + (d[bB * 3] - d[bA * 3]) * tt, qy = d[bA * 3 + 1] + (d[bB * 3 + 1] - d[bA * 3 + 1]) * tt, qz = d[bA * 3 + 2] + (d[bB * 3 + 2] - d[bA * 3 + 2]) * tt, ql = Math.sqrt(qx * qx + qy * qy + qz * qz) || 1, cx, cy, cz, cl2;
+      ax = w * qx; ay = w * qy; az = w * qz;
       for (i = 0; i < nC; i++) {
-        g = _G[i]; d = g.d; bA = b0 < g.nbn ? b0 : g.nbn - 1; bB = b0 + 1 < g.nbn ? b0 + 1 : g.nbn - 1; w = _Wt[i];
-        ax += w * (d[bA * 3] + (d[bB * 3] - d[bA * 3]) * tt); ay += w * (d[bA * 3 + 1] + (d[bB * 3 + 1] - d[bA * 3 + 1]) * tt); az += w * (d[bA * 3 + 2] + (d[bB * 3 + 2] - d[bA * 3 + 2]) * tt);
+        if (i === iH) continue;
+        g = _G[i]; d = g.d; if (b0 >= g.nbn) continue;                       // 이웃 칸의 표가 여기까지 안 옴 — 안 섞음
+        bA = b0; bB = b0 + 1 < g.nbn ? b0 + 1 : g.nbn - 1; w = _Wt[i];
+        cx = d[bA * 3] + (d[bB * 3] - d[bA * 3]) * tt; cy = d[bA * 3 + 1] + (d[bB * 3 + 1] - d[bA * 3 + 1]) * tt; cz = d[bA * 3 + 2] + (d[bB * 3 + 2] - d[bA * 3 + 2]) * tt; cl2 = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1;
+        if ((cx * qx + cy * qy + cz * qz) / (cl2 * ql) < cfg.binGate) continue;
+        ax += w * cx; ay += w * cy; az += w * cz;
       }
       al = Math.sqrt(ax * ax + ay * ay + az * az);
       if (al > 1e-4) { vx = ax / al; vy = ay / al; vz = az / al; }
       px += vx * ds; py += vy * ds; pz += vz * ds;
       pl = Math.sqrt(px * px + py * py + pz * pz);
       if (pl < 1 && pl > 1e-6) { px /= pl; py /= pl; pz /= pl; }           // 두피 속으로는 안 감
-      out[k + 1] = { x: px * E.a, y: CY + py * E.b, z: pz * E.c };
+      var pt = { x: px * E.a, y: CY + py * E.b, z: pz * E.c };
+      if (guard) { var pg = guard(pt); if (pg && pg !== pt) { pt = pg; px = pt.x / E.a; py = (pt.y - CY) / E.b; pz = pt.z / E.c; } }   // 목 속으로는 안 감
+      out[k + 1] = pt;
     }
     return out;
   }
@@ -412,6 +459,7 @@
   }
 
   var fjSeq = 0;
+  function neckGuard() { return (FS.guardNeck && G && typeof G.neckPush === 'function') ? G.neckPush : null; }
   function frac(v) { return v - Math.floor(v); }
   /* 뿌리를 제 두피 칸 안에서 옮김(17번 격자: x = a·sinφ·sinθ, y = CY + b·cosφ, z = c·sinφ·cosθ) */
   function jitterRoot(root, env, u1, u2) {
@@ -438,7 +486,7 @@
                 if (s._fj === undefined) { fjSeq++; s._fj = [frac(fjSeq * 0.6180339887), frac(fjSeq * 0.7548776662), frac(fjSeq * 0.5698402910)]; }
                 root = jitterRoot(root, env, s._fj[0], s._fj[1]); hh = s._fj[2];
               } else hh = hash01(root);
-              var sk = shape(root, hh, rt, env.E, env.CY, 0, FS);
+              var sk = shape(root, hh, rt, env.E, env.CY, 0, FS, neckGuard());
               mem = s._fsk = { t: rt, e: env, pts: sk };
               if (sk) ST.shaped++; else ST.fallback++;
             }
