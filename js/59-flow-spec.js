@@ -1,0 +1,543 @@
+/* ==========================================================================
+ * 59-flow-spec.js — 결 표 · 길이 지도를 스타일 스펙에 넘기기 (원본 머리 = 마네킹 + 숫자 + 결 + 길이)
+ *
+ * 로드 위치: index.html 맨 끝(57-spec-pass.js · 58-original-on-mannequin.js 다음). 42·16·17·57·58번은 고치지 않습니다.
+ *
+ * 왜 (2026-10-07 · 사용자): "원본 다시 기르기로 작업한 스타일을 저장한 다음 다시 적용하면 마네킹 모드로 넘어가면서 원래 모양과 완전히 달라진다."
+ *   "스타일을 저장한다는 건 그 살롱의 대표 헤어로 다른 손님들에게도 적용하기 위해서다."
+ *   "마네킹 기반으로 해서 스펙을 모두(숫자만이 아니라) 올리는 방향으로 가는 게 맞다." "(앞머리) 내려 심기 안 해도 된다. (섹션 길이 자동 맞추기 끄기) 그 방향으로 진행."
+ *   2026-10-07 로그(직모 긴 머리 · 가운데 가르마): 저장된 값은 섹션 6개의 끝 높이 · 컬 0 · 볼륨 49 · 넘김 +14뿐.
+ *   다시 걸면 마네킹이 앞머리 1,042가닥을 눈높이까지 내려 심고(얼굴을 덮는 가닥 front 1,362/1,527), temple은 슬라이더 100에 걸려 오차 32%.
+ *   가르마는 위치 0.0(가운데)이라 57번도 못 넘김. 58번 주석: "자리마다의 결 방향·두께는 아직 스펙에 없습니다."
+ *
+ * 무엇을 스펙에 더 넣나 (spec.flow — 다시 기른 가닥(42번 · 정렬 뒤)에서 뽑음):
+ *   · 결 표 — 두피 칸(뿌리 자리) × 뿌리에서의 길이 칸마다 "가닥이 가는 방향".
+ *   · 길이 지도 — 두피 칸마다 가닥 길이의 분포(10·30·50·70·90%).
+ *   · 갈리는 칸(가르마) — 한 칸 안에서 가닥이 두 쪽으로 갈리면 두 무리로 나눠 따로 저장하고, 가닥은 뿌리 자리가 가까운 쪽 무리를 따릅니다.
+ *   전부 "두상으로 나눈 좌표"(두피 타원체의 반축 a·b·c로 나눔)로 저장합니다 → 다른 손님에게 걸 때는 그 손님 두상의 a·b·c를 곱합니다.
+ *   spec.flowBase — 표를 뽑을 때의 넘김·볼륨·컬(= 표에 이미 들어 있는 값). spec.flowLen — 표 위에 걸 섹션 길이 슬라이더 값(처음엔 기본값).
+ *
+ * 어떻게 거나 (마네킹 가닥 · 걸려 있는 스타일의 스펙에 flow가 있을 때만):
+ *   · 가닥의 뼈대 — 마네킹이 만든 뼈대 대신, 제 뿌리 자리의 표를 따라 뿌리에서부터 걸어 만든 뼈대를 씁니다(둘레 8칸을 섞음 · 길이는 제 칸의 분포에서).
+ *     모든 가닥이 칸의 결을 따르므로 혼자 뜬 잔머리가 처음부터 없습니다.
+ *   · 그 위의 슬라이더 — 42번이 다시 기른 가닥에 하는 것과 같은 방식("기준에서 움직인 만큼만"):
+ *     섹션 길이 = 기본값 대비 비율 · 넘김/볼륨/가르마 = flowBase에서 달라진 만큼 · 컬 = 지금 값(표는 컬을 편 뼈대).
+ *   · 마네킹의 앞머리 내려 심기(앞머리선에서 자르기)는 안 탑니다 · 섹션 길이 자동 맞추기(tipAt/lenCm 역산)는 건너뜁니다(스펙의 값은 그대로 둠 — 끄면 예전 동작).
+ *   · [현재 모델을 스타일로 등록] — 지금 걸린 표를 새 스펙에 그대로 싣고, 그때의 섹션 길이 슬라이더 값을 flowLen에 넣습니다.
+ *
+ * 그대로 안 되는 것 / 알아둘 것:
+ *   · 표 위에서는 섹션의 "길이" 말고 다른 커트 값(기법·각도 등)은 안 걸립니다(42번 원본 화면과 같음). 숱(density) · 색 · 컬 · 페이드는 걸립니다.
+ *   · 스타일 하나에 표가 수십 KB 붙습니다. 브라우저 저장소(약 5MB)가 차면 저장이 안 되고 화면에 알립니다.
+ *   · 빗질(53번)한 것은 스펙에 안 들어갑니다(지금처럼 그 화면에서만).
+ *   · 이미 등록해 둔 스타일에는 표가 없습니다 — 원본 머리에서 다시 등록해야 들어갑니다.
+ *
+ * 확인한 것(합성 머리 — 가운데·옆 가르마 · 앞쪽만 짧은 긴 직모 · 잔머리 12%):
+ *   · 표 만들기 → 싣기 → 풀기 → 같은/큰/작은 두상에 걸기: 두피 속 점 0 · 가르마를 건너가는 가닥 0 · 끝 높이(두상 높이 대비) 두상 크기와 무관하게 같음.
+ *   · 실제 앱 코드를 브라우저에 올려서(사진 모델·다시 기른 모델은 지어낸 것): 스타일 걸기(applyStyleSpecAndRender → 앱이 직접 만든 마네킹 29,999가닥)에서
+ *     전 가닥이 표대로 · 얼굴 앞을 지나는 가닥 0(같은 스타일을 표 없이 걸면 2,305) · 기준 상태의 가닥 = 표 뼈대와 점 단위로 같음 ·
+ *     섹션 길이 슬라이더 30/50/70이 그 섹션에만 걸림 · 컬·넘김이 그 위에 걸림 · [현재 모델을 스타일로 등록] → 저장소 → 다시 걸기 · 끄면 예전 동작.
+ * 확인 못 한 것: 실제 손님 사진 · 58번의 원본 올리기 경로 전체(42번 재기는 실제 다시 기르기가 있어야 돕니다) · 마네킹이 앞머리를 내려 심는 손님 · 폰 속도.
+ *   진단 [결 표] 줄의 "표로 다시 만든 가닥 ↔ 원래 가닥" 거리가 실제 사진에서 표가 얼마나 잃는지를 말해 줍니다.
+ *
+ * 끄기: FLOW_SPEC.on=false 후 스타일을 다시 걸기(그러면 그 스타일은 예전처럼 숫자만으로 걸립니다) · 표를 스펙에 안 싣기: FLOW_SPEC.save=false
+ * ========================================================================== */
+(function () {
+  'use strict';
+  var W = window, TAG = '[결 표]';
+  var FS = W.FLOW_SPEC = Object.assign({
+    on: true,            // 거는 쪽: 스펙에 flow가 있으면 마네킹 가닥을 표대로
+    save: true,          // 싣는 쪽: 원본 머리의 스펙에 flow를 넣음
+    cs: 0.14,            // 두피 칸(두상으로 나눈 좌표 · 0.14 ≈ 1cm)
+    bin: 0.08,           // 길이 칸(같은 좌표 · ≈ 0.6~0.9cm)
+    maxBins: 72,         // 길이 칸 상한(≈ 60cm)
+    early: 0.35,         // 가닥이 "어느 쪽으로 가는가"를 보는 길이(뿌리에서 · ≈ 4cm)
+    minCell: 3,          // 한 칸에 가닥이 이만큼은 있어야 표로 씀
+    splitCoh: 0.8,       // 칸 안 가닥들의 방향 모임(0~1)이 이보다 낮으면 두 무리로 갈라 봄
+    splitAngle: 50,      // 도: 두 무리의 방향이 이만큼은 벌어져야 가름
+    splitMinShare: 0.2,  // 작은 무리가 이 비율은 돼야 가름
+    trim: 45,            // 도: 칸 평균을 다시 낼 때 첫 평균에서 이 안쪽인 마디만
+    step: 0.05,          // 뼈대를 걸을 때 한 걸음(같은 좌표) — 가닥이 길면 maxPts에 맞춰 넓어짐
+    minPts: 6, maxPts: 28,
+    matchDot: 0.5,       // 이웃 칸의 무리가 제 무리와 이만큼(cos)은 같은 쪽이어야 섞음
+    fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
+  }, W.FLOW_SPEC || {});
+  var ST = FS.stats = { built: null, shaped: 0, fallback: 0, err: null, saveWarn: null };
+
+  function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
+  function qv(a, f) { if (!a.length) return NaN; var b = a.slice().sort(function (x, y) { return x - y; }); return b[Math.min(b.length - 1, Math.floor(b.length * f))]; }
+  var OFF = 64, SPAN = 128;
+  function keyOf(ix, iy, iz) { return (ix + OFF) + SPAN * ((iy + OFF) + SPAN * (iz + OFF)); }
+  function hash01(p) { var v = Math.sin(p.x * 269.5 + p.y * 183.3 + p.z * 419.2) * 24634.6345; return v - Math.floor(v); }   // 08번 _cutHash01(숱 솎기)과 다른 상수 — 같으면 숱을 줄일 때 짧은 가닥만 남음
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * 표 만들기 — strands: [{pts:[{x,y,z}…]}] · E: 두피 타원체 {a,b,c} · CY: 두상 중심 높이
+   * ---------------------------------------------------------------------------------------------------------- */
+  function buildTable(strands, E, CY, cfg) {
+    cfg = cfg || FS;
+    var cs = cfg.cs, bin = cfg.bin, NBmax = cfg.maxBins | 0, n = strands.length, recs = [], cells = new Map(), si, i;
+    var ia = 1 / E.a, ib = 1 / E.b, ic = 1 / E.c, cTrim = Math.cos(cfg.trim * Math.PI / 180), maxLen = 0;
+    for (si = 0; si < n; si++) {
+      var p = strands[si] && strands[si].pts; if (!p || p.length < 3) continue;
+      var m = p.length, N = new Float32Array(m * 3);
+      for (i = 0; i < m; i++) { N[i * 3] = p[i].x * ia; N[i * 3 + 1] = (p[i].y - CY) * ib; N[i * 3 + 2] = p[i].z * ic; }
+      var rl = Math.sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]); if (!(rl > 0.2)) continue;
+      var ux = N[0] / rl, uy = N[1] / rl, uz = N[2] / rl, ix = Math.floor(ux / cs), iy = Math.floor(uy / cs), iz = Math.floor(uz / cs);
+      // 길이 · 이른 방향(뿌리에서 early만큼 간 자리까지의 방향)
+      var len = 0, ex = 0, ey = 0, ez = 0, got = false, dx, dy, dz, l;
+      for (i = 1; i < m; i++) {
+        dx = N[i * 3] - N[i * 3 - 3]; dy = N[i * 3 + 1] - N[i * 3 - 2]; dz = N[i * 3 + 2] - N[i * 3 - 1]; l = Math.sqrt(dx * dx + dy * dy + dz * dz); len += l;
+        if (!got && len >= cfg.early) { ex = N[i * 3] - N[0]; ey = N[i * 3 + 1] - N[1]; ez = N[i * 3 + 2] - N[2]; got = true; }
+      }
+      if (!(len > bin * 0.5)) continue;
+      if (!got) { ex = N[m * 3 - 3] - N[0]; ey = N[m * 3 - 2] - N[1]; ez = N[m * 3 - 1] - N[2]; }
+      l = Math.sqrt(ex * ex + ey * ey + ez * ez); if (!(l > 1e-6)) continue;
+      var rec = { N: N, m: m, len: len, ex: ex / l, ey: ey / l, ez: ez / l, ox: ux - (ix + 0.5) * cs, oy: uy - (iy + 0.5) * cs, oz: uz - (iz + 0.5) * cs, cl: 0 };
+      var k = keyOf(ix, iy, iz), c = cells.get(k);
+      if (!c) { c = { ix: ix, iy: iy, iz: iz, recs: [] }; cells.set(k, c); }
+      c.recs.push(rec); recs.push(rec); if (len > maxLen) maxLen = len;
+    }
+    var nb = Math.max(2, Math.min(NBmax, Math.ceil(maxLen / bin))), out = [], nSplit = 0, nUsed = 0, nSkipCell = 0;
+    cells.forEach(function (c) {
+      var R = c.recs, nr = R.length, j, r;
+      if (nr < cfg.minCell) { nSkipCell++; return; }
+      // 갈리는 칸인가
+      var sx = 0, sy = 0, sz = 0; for (j = 0; j < nr; j++) { sx += R[j].ex; sy += R[j].ey; sz += R[j].ez; }
+      var coh = Math.sqrt(sx * sx + sy * sy + sz * sz) / nr, groups = [R];
+      if (coh < cfg.splitCoh && nr >= 2 * cfg.minCell) {
+        var sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1, mx = sx / sl, my = sy / sl, mz = sz / sl, a = R[0], b = R[0], best = 2, d;
+        for (j = 0; j < nr; j++) { d = R[j].ex * mx + R[j].ey * my + R[j].ez * mz; if (d < best) { best = d; a = R[j]; } }
+        best = 2; for (j = 0; j < nr; j++) { d = R[j].ex * a.ex + R[j].ey * a.ey + R[j].ez * a.ez; if (d < best) { best = d; b = R[j]; } }
+        var A = [a.ex, a.ey, a.ez], B = [b.ex, b.ey, b.ez], it, na, nbb, ax, ay, az, bx, by, bz, al, bl;
+        for (it = 0; it < 6; it++) {
+          ax = ay = az = bx = by = bz = 0; na = nbb = 0;
+          for (j = 0; j < nr; j++) {
+            r = R[j];
+            if (r.ex * A[0] + r.ey * A[1] + r.ez * A[2] >= r.ex * B[0] + r.ey * B[1] + r.ez * B[2]) { r.cl = 0; ax += r.ex; ay += r.ey; az += r.ez; na++; }
+            else { r.cl = 1; bx += r.ex; by += r.ey; bz += r.ez; nbb++; }
+          }
+          al = Math.sqrt(ax * ax + ay * ay + az * az); bl = Math.sqrt(bx * bx + by * by + bz * bz);
+          if (!(al > 1e-6) || !(bl > 1e-6)) break;
+          A = [ax / al, ay / al, az / al]; B = [bx / bl, by / bl, bz / bl];
+        }
+        var cosAB = A[0] * B[0] + A[1] * B[1] + A[2] * B[2];
+        if (na >= cfg.minCell && nbb >= cfg.minCell && Math.min(na, nbb) / nr >= cfg.splitMinShare && cosAB <= Math.cos(cfg.splitAngle * Math.PI / 180)) {
+          groups = [R.filter(function (q) { return q.cl === 0; }), R.filter(function (q) { return q.cl === 1; })]; nSplit++;
+        } else for (j = 0; j < nr; j++) R[j].cl = 0;
+      }
+      var cell = { ix: c.ix, iy: c.iy, iz: c.iz, cl: [] };
+      groups.forEach(function (Gr) {
+        var gn = Gr.length, D0 = new Float32Array(nb * 4), D1 = new Float32Array(nb * 4), pass, j2, r2, i2, b0, b1, bb, arc, dx, dy, dz, l, o, rx, ry, rz, rn;
+        for (pass = 0; pass < 2; pass++) {
+          var D = pass ? D1 : D0;
+          for (j2 = 0; j2 < gn; j2++) {
+            r2 = Gr[j2]; arc = 0;
+            for (i2 = 1; i2 < r2.m; i2++) {
+              dx = r2.N[i2 * 3] - r2.N[i2 * 3 - 3]; dy = r2.N[i2 * 3 + 1] - r2.N[i2 * 3 - 2]; dz = r2.N[i2 * 3 + 2] - r2.N[i2 * 3 - 1]; l = Math.sqrt(dx * dx + dy * dy + dz * dz);
+              if (!(l > 1e-9)) continue;
+              dx /= l; dy /= l; dz /= l;
+              b0 = Math.min(nb - 1, Math.floor(arc / bin)); arc += l; b1 = Math.min(nb - 1, Math.floor((arc - 1e-9) / bin));
+              for (bb = b0; bb <= b1; bb++) {
+                o = bb * 4;
+                if (pass) { rx = D0[o]; ry = D0[o + 1]; rz = D0[o + 2]; rn = Math.sqrt(rx * rx + ry * ry + rz * rz); if (D0[o + 3] >= 3 && rn > 1e-6 && (dx * rx + dy * ry + dz * rz) / rn < cTrim) continue; }
+                D[o] += dx; D[o + 1] += dy; D[o + 2] += dz; D[o + 3] += 1;
+              }
+            }
+          }
+        }
+        // 길이 칸: 다듬은 평균(없으면 첫 평균) · 가닥이 minKeep개도 안 남은 칸에서 끊음
+        var minKeep = gn >= 8 ? 2 : 1, dirs = [], nbn = 0, ex = 0, ey = 0, ez = 0, ox = 0, oy = 0, oz = 0, lens = [];
+        for (bb = 0; bb < nb; bb++) {
+          o = bb * 4; if (!(D0[o + 3] >= minKeep)) break;
+          var useT = D1[o + 3] >= 1, vx = useT ? D1[o] : D0[o], vy = useT ? D1[o + 1] : D0[o + 1], vz = useT ? D1[o + 2] : D0[o + 2], vl = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          if (!(vl > 1e-6)) { vx = D0[o]; vy = D0[o + 1]; vz = D0[o + 2]; vl = Math.sqrt(vx * vx + vy * vy + vz * vz); }
+          if (!(vl > 1e-6)) { if (nbn) { vx = dirs[nbn * 3 - 3]; vy = dirs[nbn * 3 - 2]; vz = dirs[nbn * 3 - 1]; vl = 1; } else break; }
+          dirs.push(vx / vl, vy / vl, vz / vl); nbn++;
+        }
+        if (!nbn) return;
+        for (j2 = 0; j2 < gn; j2++) { r2 = Gr[j2]; ex += r2.ex; ey += r2.ey; ez += r2.ez; ox += r2.ox; oy += r2.oy; oz += r2.oz; lens.push(Math.min(r2.len, nbn * bin)); }
+        l = Math.sqrt(ex * ex + ey * ey + ez * ez) || 1;
+        cell.cl.push({ n: gn, e: [ex / l, ey / l, ez / l], rc: [ox / gn, oy / gn, oz / gn], q: [qv(lens, 0.1), qv(lens, 0.3), qv(lens, 0.5), qv(lens, 0.7), qv(lens, 0.9)], nbn: nbn, d: dirs });
+        nUsed += gn;
+      });
+      if (cell.cl.length) out.push(cell);
+    });
+    return { cs: cs, bin: bin, nb: nb, cells: out, stats: { strands: recs.length, used: nUsed, cells: out.length, split: nSplit, skipped: nSkipCell, maxLen: maxLen } };
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * 싣기 / 풀기 — 무리 하나 = [ix,iy,iz, 무리번호|무리수<<1, n, e×3, rc×3, q×5, nbn, 방향 nbn×3] (전부 1바이트)
+   * ---------------------------------------------------------------------------------------------------------- */
+  function c8(v) { v = Math.round(v * 127); return v < -127 ? -127 : v > 127 ? 127 : v; }
+  function b64(u8) { var s = '', i, CH = 0x8000; for (i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
+  function unb64(s) { var b = atob(s), u = new Uint8Array(b.length), i; for (i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+  function encode(t) {
+    var lmax = 0, tot = 0, nrec = 0;
+    t.cells.forEach(function (c) { c.cl.forEach(function (g) { if (g.q[4] > lmax) lmax = g.q[4]; tot += 17 + g.nbn * 3; nrec++; }); });
+    if (!(lmax > 0)) lmax = t.bin;
+    var u = new Uint8Array(tot), I = new Int8Array(u.buffer), o = 0;
+    t.cells.forEach(function (c) {
+      c.cl.forEach(function (g, gi) {
+        var k;
+        I[o++] = c.ix; I[o++] = c.iy; I[o++] = c.iz; u[o++] = gi | (c.cl.length << 1); u[o++] = Math.min(255, g.n);
+        for (k = 0; k < 3; k++) I[o++] = c8(g.e[k]);
+        for (k = 0; k < 3; k++) I[o++] = c8(g.rc[k] / t.cs);
+        for (k = 0; k < 5; k++) u[o++] = Math.max(0, Math.min(255, Math.round(g.q[k] / lmax * 255)));
+        u[o++] = g.nbn;
+        for (k = 0; k < g.nbn * 3; k++) I[o++] = c8(g.d[k]);
+      });
+    });
+    return { v: 1, cs: t.cs, bin: t.bin, lmax: +lmax.toFixed(4), n: nrec, d: b64(u) };
+  }
+  var RT = (typeof WeakMap === 'function') ? new WeakMap() : null, RTs = { s: null, t: null };
+  function decode(f) {
+    if (!f || f.v !== 1 || typeof f.d !== 'string') return null;
+    var hit = RT ? RT.get(f) : null; if (hit) return hit;
+    if (RTs.s === f.d) { if (RT) RT.set(f, RTs.t); return RTs.t; }        // 같은 표를 복사한 스펙(JSON 복제)
+    var u = unb64(f.d), I = new Int8Array(u.buffer), o = 0, map = new Map(), k, nrec = 0;
+    while (o + 17 <= u.length) {
+      var ix = I[o++], iy = I[o++], iz = I[o++], fl = u[o++], n = u[o++], e = [I[o++] / 127, I[o++] / 127, I[o++] / 127];
+      var rc = [I[o++] / 127 * f.cs, I[o++] / 127 * f.cs, I[o++] / 127 * f.cs], q = new Float32Array(5);
+      for (k = 0; k < 5; k++) q[k] = u[o++] / 255 * f.lmax;
+      var nbn = u[o++]; if (o + nbn * 3 > u.length) break;
+      var d = new Float32Array(nbn * 3), l;
+      for (k = 0; k < nbn; k++) { d[k * 3] = I[o++]; d[k * 3 + 1] = I[o++]; d[k * 3 + 2] = I[o++]; l = Math.sqrt(d[k * 3] * d[k * 3] + d[k * 3 + 1] * d[k * 3 + 1] + d[k * 3 + 2] * d[k * 3 + 2]) || 1; d[k * 3] /= l; d[k * 3 + 1] /= l; d[k * 3 + 2] /= l; }
+      var key = keyOf(ix, iy, iz), c = map.get(key);
+      if (!c) { c = { ix: ix, iy: iy, iz: iz, cl: [] }; map.set(key, c); }
+      c.cl[fl & 1] = { n: n, e: e, rc: rc, q: q, nbn: nbn, d: d }; nrec++;
+    }
+    map.forEach(function (c) { c.cl = c.cl.filter(Boolean); });
+    var t = { cs: f.cs, bin: f.bin, lmax: f.lmax, map: map, n: nrec };
+    if (RT) RT.set(f, t); RTs.s = f.d; RTs.t = t;
+    return t;
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * 뼈대 걷기 — root: 가닥 뿌리(모델 좌표) · h: 0~1(길이 분포에서 뽑을 자리) · t: 풀어 둔 표 · E, CY: 걸 두상
+   *   lenOver(같은 좌표의 길이)가 있으면 길이 분포 대신 그 길이로(진단용). 못 만들면 null.
+   * ---------------------------------------------------------------------------------------------------------- */
+  var _C = new Array(8), _G = new Array(8), _Wt = new Float64Array(8);
+  function pickCluster(c, ox, oy, oz, h, cs) {
+    if (c.cl.length < 2) return c.cl[0];
+    var A = c.cl[0], B = c.cl[1], sx = A.rc[0] - B.rc[0], sy = A.rc[1] - B.rc[1], sz = A.rc[2] - B.rc[2];
+    if (sx * sx + sy * sy + sz * sz > 0.0625 * cs * cs) {                 // 두 무리의 뿌리 자리가 떨어져 있음(가르마) — 가까운 쪽
+      var da = (ox - A.rc[0]) * (ox - A.rc[0]) + (oy - A.rc[1]) * (oy - A.rc[1]) + (oz - A.rc[2]) * (oz - A.rc[2]);
+      var db = (ox - B.rc[0]) * (ox - B.rc[0]) + (oy - B.rc[1]) * (oy - B.rc[1]) + (oz - B.rc[2]) * (oz - B.rc[2]);
+      return da <= db ? A : B;
+    }
+    return h < A.n / (A.n + B.n) ? A : B;                                 // 섞여 있음 — 비율대로
+  }
+  function quant(q, h) { var f = (h < 0 ? 0 : h > 1 ? 1 : h) * 4, i = Math.min(3, Math.floor(f)), t = f - i; return q[i] + (q[i + 1] - q[i]) * t; }
+  function shape(root, h, t, E, CY, lenOver, cfg) {
+    cfg = cfg || FS;
+    var cs = t.cs, bin = t.bin, nx = root.x / E.a, ny = (root.y - CY) / E.b, nz = root.z / E.c, rl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (!(rl > 0.2)) return null;
+    var ux = nx / rl, uy = ny / rl, uz = nz / rl, hx = Math.floor(ux / cs), hy = Math.floor(uy / cs), hz = Math.floor(uz / cs);
+    var gx = ux / cs - 0.5, gy = uy / cs - 0.5, gz = uz / cs - 0.5, x0 = Math.floor(gx), y0 = Math.floor(gy), z0 = Math.floor(gz), fx = gx - x0, fy = gy - y0, fz = gz - z0;
+    var home = t.map.get(keyOf(hx, hy, hz)), k, dx, dy, dz, c, w, best = -1, i;
+    if (!home) {                                                           // 제 칸에 표가 없음 — 둘레 8칸 중 가장 가까운 칸, 없으면 2칸 둘레까지
+      for (k = 0; k < 8; k++) {
+        dx = k & 1; dy = (k >> 1) & 1; dz = (k >> 2) & 1; c = t.map.get(keyOf(x0 + dx, y0 + dy, z0 + dz)); if (!c) continue;
+        w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz); if (w > best) { best = w; home = c; }
+      }
+      if (!home) {
+        var bd = 1e9, ddx, ddy, ddz, dd;
+        for (dz = -2; dz <= 2; dz++) for (dy = -2; dy <= 2; dy++) for (dx = -2; dx <= 2; dx++) {
+          c = t.map.get(keyOf(hx + dx, hy + dy, hz + dz)); if (!c) continue;
+          ddx = (hx + dx + 0.5) * cs - ux; ddy = (hy + dy + 0.5) * cs - uy; ddz = (hz + dz + 0.5) * cs - uz; dd = ddx * ddx + ddy * ddy + ddz * ddz;
+          if (dd < bd) { bd = dd; home = c; }
+        }
+        if (!home) return null;
+      }
+    }
+    var H = pickCluster(home, ux - (home.ix + 0.5) * cs, uy - (home.iy + 0.5) * cs, uz - (home.iz + 0.5) * cs, h, cs), e = H.e, nC = 0, wsum = 0, g, j, dt, bdot;
+    for (k = 0; k < 8; k++) {
+      dx = k & 1; dy = (k >> 1) & 1; dz = (k >> 2) & 1; c = t.map.get(keyOf(x0 + dx, y0 + dy, z0 + dz)); if (!c) continue;
+      w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz); if (!(w > 1e-4)) continue;
+      if (c === home) g = H;
+      else { g = null; bdot = cfg.matchDot; for (j = 0; j < c.cl.length; j++) { dt = c.cl[j].e[0] * e[0] + c.cl[j].e[1] * e[1] + c.cl[j].e[2] * e[2]; if (dt >= bdot) { bdot = dt; g = c.cl[j]; } } if (!g) continue; }
+      w *= Math.min(1, g.n / 6); _C[nC] = c; _G[nC] = g; _Wt[nC] = w; wsum += w; nC++;
+    }
+    if (!nC || !(wsum > 1e-6)) { _G[0] = H; _Wt[0] = 1; wsum = 1; nC = 1; }
+    var len = 0;
+    if (lenOver > 0) len = lenOver; else { for (i = 0; i < nC; i++) len += _Wt[i] * quant(_G[i].q, h); len /= wsum; }
+    if (!(len > 1e-4)) return null;
+    var n = Math.max(cfg.minPts, Math.min(cfg.maxPts, Math.round(len / cfg.step))), ds = len / n, out = new Array(n + 1);
+    var px = nx, py = ny, pz = nz, vx = e[0], vy = e[1], vz = e[2], s, fb, b0, tt, ax, ay, az, al, bA, bB, d, pl;
+    out[0] = { x: root.x, y: root.y, z: root.z };
+    for (k = 0; k < n; k++) {
+      s = (k + 0.5) * ds; fb = s / bin - 0.5; b0 = Math.floor(fb); tt = fb - b0; if (b0 < 0) { b0 = 0; tt = 0; }
+      ax = ay = az = 0;
+      for (i = 0; i < nC; i++) {
+        g = _G[i]; d = g.d; bA = b0 < g.nbn ? b0 : g.nbn - 1; bB = b0 + 1 < g.nbn ? b0 + 1 : g.nbn - 1; w = _Wt[i];
+        ax += w * (d[bA * 3] + (d[bB * 3] - d[bA * 3]) * tt); ay += w * (d[bA * 3 + 1] + (d[bB * 3 + 1] - d[bA * 3 + 1]) * tt); az += w * (d[bA * 3 + 2] + (d[bB * 3 + 2] - d[bA * 3 + 2]) * tt);
+      }
+      al = Math.sqrt(ax * ax + ay * ay + az * az);
+      if (al > 1e-4) { vx = ax / al; vy = ay / al; vz = az / al; }
+      px += vx * ds; py += vy * ds; pz += vz * ds;
+      pl = Math.sqrt(px * px + py * py + pz * pz);
+      if (pl < 1 && pl > 1e-6) { px /= pl; py /= pl; pz /= pl; }           // 두피 속으로는 안 감
+      out[k + 1] = { x: px * E.a, y: CY + py * E.b, z: pz * E.c };
+    }
+    return out;
+  }
+  FS._core = { buildTable: buildTable, encode: encode, decode: decode, shape: shape, hash01: hash01 };
+
+  /* 진단: 원래 가닥을 표로 다시 만들어 얼마나 다른가(모델 단위) */
+  function fidelity(strands, t, E, CY, maxN) {
+    var n = strands.length, stride = Math.max(1, Math.ceil(n / Math.max(1, maxN))), mean = [], tip = [], si, i, miss = 0;
+    function arcOf(p, sc) { var L = 0, k, dx, dy, dz; for (k = 1; k < p.length; k++) { dx = (p[k].x - p[k - 1].x) / (sc ? E.a : 1); dy = (p[k].y - p[k - 1].y) / (sc ? E.b : 1); dz = (p[k].z - p[k - 1].z) / (sc ? E.c : 1); L += Math.sqrt(dx * dx + dy * dy + dz * dz); } return L; }
+    function at(p, L, f) {
+      var want = L * f, acc = 0, k, l;
+      for (k = 1; k < p.length; k++) { l = Math.hypot(p[k].x - p[k - 1].x, p[k].y - p[k - 1].y, p[k].z - p[k - 1].z); if (acc + l >= want && l > 0) { var u = (want - acc) / l; return { x: p[k - 1].x + (p[k].x - p[k - 1].x) * u, y: p[k - 1].y + (p[k].y - p[k - 1].y) * u, z: p[k - 1].z + (p[k].z - p[k - 1].z) * u }; } acc += l; }
+      return p[p.length - 1];
+    }
+    for (si = 0; si < n; si += stride) {
+      var p = strands[si] && strands[si].pts; if (!p || p.length < 3) continue;
+      var q = shape(p[0], hash01(p[0]), t, E, CY, arcOf(p, true)); if (!q) { miss++; continue; }
+      var Lp = arcOf(p, false), Lq = arcOf(q, false), sum = 0, a, b;
+      for (i = 1; i <= 8; i++) { a = at(p, Lp, i / 8); b = at(q, Lq, i / 8); sum += Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
+      mean.push(sum / 8); tip.push(Math.hypot(p[p.length - 1].x - q[q.length - 1].x, p[p.length - 1].y - q[q.length - 1].y, p[p.length - 1].z - q[q.length - 1].z));
+    }
+    return { n: mean.length, miss: miss, meanMed: qv(mean, 0.5), meanP90: qv(mean, 0.9), tipMed: qv(tip, 0.5), tipP90: qv(tip, 0.9) };
+  }
+  FS._core.fidelity = fidelity;
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * 앱에 끼우기
+   * ---------------------------------------------------------------------------------------------------------- */
+  var G = W.REGROW;
+  function cmPerUnit() { var cm = 16.4; try { cm = modelCmPerUnit() || 16.4; } catch (e) {} return cm; }
+  function secOrder() { return (typeof SECTION_ORDER !== 'undefined') ? SECTION_ORDER : ['crown', 'front', 'temple', 'side', 'occipital', 'nape']; }
+  function scalpEnv(model) {
+    var E = null, CY = 0.15;
+    try { E = getScalpEllipsoid(); } catch (e) { E = null; }
+    if (!E || !(E.a > 0) || !(E.b > 0) || !(E.c > 0)) return null;
+    try { if (model && isFinite(model.CY)) CY = model.CY; else if (typeof SCALP_CENTER_Y !== 'undefined' && isFinite(SCALP_CENTER_Y)) CY = SCALP_CENTER_Y; } catch (e) {}
+    return { E: { a: E.a, b: E.b, c: E.c }, CY: CY };
+  }
+
+  /* 다시 기른 모델에서 표를 뽑아 스펙 조각으로 */
+  var lastFrom = { m: null, f: null };
+  FS.fromRegrown = function () {
+    if (!G || !G.model || !G.model.strands || !G.model.strands.length) return null;
+    if (lastFrom.m === G.model && lastFrom.f) return lastFrom.f;         // 같은 모델이면 다시 안 뽑음(원본 ↔ 마네킹을 오갈 때마다 부르므로)
+    var env = scalpEnv(G.model); if (!env) return null;
+    var t0 = now(), tb = buildTable(G.model.strands, env.E, env.CY, FS), f = encode(tb), rt = decode(f), fid = null;
+    lastFrom.m = G.model; lastFrom.f = f;
+    try { fid = fidelity(G.model.strands, rt, env.E, env.CY, FS.fidelityN); } catch (e) { fid = null; }
+    ST.built = { at: new Date().toTimeString().slice(0, 8), ms: now() - t0, bytes: f.d.length, stats: tb.stats, nb: tb.nb, fid: fid, cm: cmPerUnit() };
+    return f;
+  };
+
+  /* 잰 결과(r)에 표를 실음 — r.spec을 그 자리에서 고침. tipAt/lenCm은 지우지 않습니다(끄면 예전 동작 · 걸 때만 가림) */
+  FS.enrich = function (r) {
+    if (!FS.save || !r || !r.spec) return r;
+    var f = null;
+    try { f = FS.fromRegrown(); } catch (e) { ST.err = '표 만들기 실패: ' + (e && e.message || e); console.warn(TAG + ' ' + ST.err, e); }
+    if (!f || !(f.n > 0)) { ST.err = '표가 비었습니다(다시 기른 가닥에서 칸을 하나도 못 만듦) — 숫자만 넘깁니다'; console.warn(TAG + ' ' + ST.err); return r; }
+    var sp = r.spec, sty = sp.styling || {}, perm = sp.perm || {}, len = {};
+    secOrder().forEach(function (sec) { try { len[sec] = SECTIONS[sec].defaults.length; } catch (e) { len[sec] = 50; } });
+    sp.flow = f;
+    sp.flowBase = { sweep: sty.sweep || 0, volume: typeof sty.volume === 'number' ? sty.volume : 50, part: sty.part || 0, partAmt: sty.partAmt || 0,
+      curl: perm.curl > 0 ? perm.curl : 0, wave: typeof perm.wave === 'number' ? perm.wave : 50,
+      rodScale: (perm.rodScale > 1 ? perm.rodScale : (r.curl && perm.curl > 0 && r.curl.rodScale > 1 ? +(+r.curl.rodScale).toFixed(2) : 1)) };
+    sp.flowLen = len;
+    try { console.log(FS.lines().join('\n')); } catch (e) {}
+    return r;
+  };
+  // 57번이 있으면 그 "넣기" 뒤에(58번 원본 올리기 · 42번 등록이 둘 다 이 자리를 지남), 없으면 42번 등록에 직접
+  if (W.SPEC_PASS && typeof W.SPEC_PASS.enrich === 'function') {
+    var innerEnrich = W.SPEC_PASS.enrich;
+    W.SPEC_PASS.enrich = function (r) { var o = innerEnrich.apply(this, arguments); try { FS.enrich(o || r); } catch (e) { console.warn(TAG + ' 싣기 실패(없이 진행)', e); } return o; };
+  } else if (G && typeof G.register === 'function' && typeof G.measure === 'function') {
+    var origRegister = G.register;
+    G.register = function () {
+      var m = G.measure, stl;
+      G.measure = function () { var r = m.apply(G, arguments); try { return r ? FS.enrich(r) : r; } catch (e) { return r; } };
+      try { stl = origRegister.apply(this, arguments); } finally { G.measure = m; }
+      return stl;
+    };
+    console.warn(TAG + ' 57-spec-pass.js가 없어 42번 등록에만 끼웠습니다(58번 원본 올리기에는 표가 안 실립니다)');
+  }
+
+  /* 지금 걸린(또는 걸고 있는) 스타일의 표 — 마네킹 모델일 때만 */
+  var pendingId = null, actId = null, actSpec = null, envModel = null, envVal = null;
+  function activeSpec() {
+    if (!FS.on) return null;
+    var id = null; try { id = pendingId || state.specAppliedId; } catch (e) { return null; }
+    if (!id) return null;
+    if (id !== actId || !actSpec) { actId = id; actSpec = null; try { actSpec = (typeof getStyleSpec === 'function') ? getStyleSpec(id) : null; } catch (e) { actSpec = null; } }
+    return (actSpec && actSpec.flow) ? actSpec : null;
+  }
+  function refreshActive() { actId = null; actSpec = null; envModel = null; envVal = null; }
+  FS.active = function () { var s = activeSpec(); return s ? s.flow : null; };
+  function envFor(model) { if (model !== envModel) { envModel = model; envVal = scalpEnv(model); } return envVal; }
+
+  /* 표 위에서 슬라이더 걸기 — 42번 adjustRegrown과 같은 방식(기준에서 움직인 만큼만) */
+  function adjustFlow(s, g, base, lenOverride, styOverride) {
+    var cur = (state.sections && state.sections[s.sec]) || {};
+    var sty = (styOverride !== undefined ? styOverride : uniformStyling()) || stylingForRoot(s.pts[0]) || {};
+    var C0 = base.curl || 0, dlen = 50; try { dlen = SECTIONS[s.sec].defaults.length; } catch (e) {}
+    var r = sectionLengthRatio(s.sec, typeof lenOverride === 'number' ? lenOverride : cur.length) / (sectionLengthRatio(s.sec, dlen) || 1);
+    var curl = Math.max(0, cur.curl || 0), keep = C0 > 0 && G && typeof G.curlRemain === 'function' && G.curlKeepShape !== false, total = r, cover = r;
+    if (keep) { total = r / G.curlRemain(C0); var used = total * G.curlRemain(curl); cover = used > 1.0005 ? used : Math.min(1, total); }
+    if (Math.abs(cover - 1) > 1e-6) g = lengthStrand3D(g, cover);
+    var sweep = Math.max(-100, Math.min(100, (sty.sweep || 0) - (base.sweep || 0)));
+    var vol = Math.max(0, Math.min(100, 50 + ((typeof sty.volume === 'number' ? sty.volume : 50) - (typeof base.volume === 'number' ? base.volume : 50))));
+    var samePart = (sty.part || 0) === (base.part || 0) && (sty.partAmt || 0) === (base.partAmt || 0);
+    var part = samePart ? 0 : (sty.part || 0), partAmt = samePart ? 0 : sty.partAmt, spine = false;
+    try { spine = typeof STYLE_ORDER !== 'undefined' && !!STYLE_ORDER.spineFirst; } catch (e) {}
+    if (spine) { g = partStrand3D(g, part, curl, partAmt); g = sweepStrand3D(g, sweep * sweepCurlScale(curl), curl, part, partAmt); }
+    if (keep && total > cover * 1.0005) g = padArc(g, total / cover);
+    var ks = (C0 > 0 && base.rodScale > 1 && curl > 0) ? Math.min(4, base.rodScale) : 1;
+    if (ks > 1) g = scalePts(g, 1 / ks);
+    g = curlStrand3D(g, curl, (typeof cur.wave === 'number' ? cur.wave : 50) / 100, typeof cur.curlDir === 'number' ? cur.curlDir : 0);
+    if (ks > 1) g = scalePts(g, ks);
+    if (keep) { if (curl > C0) g = gravityDroop3D(g, curl - C0); } else if (curl > 0) g = gravityDroop3D(g, curl);
+    if (!spine) { g = partStrand3D(g, part, curl, partAmt); g = sweepStrand3D(g, sweep, curl, part, partAmt); }
+    g = volumeStrand3D(g, vol, s.sec);
+    g = flowCurlStrand3D(g, sty.flow || 0);
+    g = sleekStrand3D(g, typeof sty.sleek === 'number' ? sty.sleek : 0);
+    return g;
+  }
+  function scalePts(pts, k) { var o = new Array(pts.length), i, p; for (i = 0; i < pts.length; i++) { p = pts[i]; o[i] = { x: p.x * k, y: p.y * k, z: p.z * k }; } return o; }
+  function padArc(pts, ratio) {
+    var n = pts.length; if (n < 2 || !(ratio > 1)) return pts;
+    var L = 0, i; for (i = 1; i < n; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y, pts[i].z - pts[i - 1].z);
+    var a = pts[n - 2], t = pts[n - 1], dx = t.x - a.x, dy = t.y - a.y, dz = t.z - a.z, dl = Math.hypot(dx, dy, dz);
+    if (!(L > 1e-9) || !(dl > 1e-9)) return pts;
+    var add = L * (ratio - 1) / dl, out = pts.slice();
+    out.push({ x: t.x + dx * add, y: t.y + dy * add, z: t.z + dz * add });
+    return out;
+  }
+
+  var fjSeq = 0;
+  function frac(v) { return v - Math.floor(v); }
+  /* 뿌리를 제 두피 칸 안에서 옮김(17번 격자: x = a·sinφ·sinθ, y = CY + b·cosφ, z = c·sinφ·cosθ) */
+  function jitterRoot(root, env, u1, u2) {
+    var NT = 64, NP = 32;
+    try { var ro = state._hair3Dneutral && state._hair3Dneutral.roots; if (ro && ro.NT > 0 && ro.NP > 0) { NT = ro.NT; NP = ro.NP; } } catch (e) {}
+    var E = env.E, nx = root.x / E.a, ny = (root.y - env.CY) / E.b, nz = root.z / E.c, r = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (!(r > 1e-6)) return root;
+    var phi = Math.acos(Math.max(-1, Math.min(1, ny / r))) + (u1 - 0.5) * Math.PI / NP, th = Math.atan2(nx, nz) + (u2 - 0.5) * 2 * Math.PI / NT;
+    if (phi < 0.01) phi = 0.01;
+    return { x: E.a * r * Math.sin(phi) * Math.sin(th), y: env.CY + E.b * r * Math.cos(phi), z: E.c * r * Math.sin(phi) * Math.cos(th) };
+  }
+  var prevAdj = W.adjustStrandGeom;
+  if (typeof prevAdj === 'function') W.adjustStrandGeom = function (s, lenOverride, styOverride) {
+    if (s && s.mannequin && s.pts && s.pts.length >= 2) {
+      var sp = activeSpec();
+      if (sp) {
+        try {
+          var rt = decode(sp.flow), model = state.hair3Dneutral, env = rt ? envFor(model) : null;
+          if (rt && env) {
+            var mem = s._fsk;
+            if (!mem || mem.t !== rt || mem.e !== env) {
+              var root = s.pts[0], hh;
+              if (s.fringe) {                                              // 마네킹이 앞머리로 내려 심은 가닥 — 한 칸의 가닥이 전부 같은 뿌리라 칸 안에 흩음
+                if (s._fj === undefined) { fjSeq++; s._fj = [frac(fjSeq * 0.6180339887), frac(fjSeq * 0.7548776662), frac(fjSeq * 0.5698402910)]; }
+                root = jitterRoot(root, env, s._fj[0], s._fj[1]); hh = s._fj[2];
+              } else hh = hash01(root);
+              var sk = shape(root, hh, rt, env.E, env.CY, 0, FS);
+              mem = s._fsk = { t: rt, e: env, pts: sk };
+              if (sk) ST.shaped++; else ST.fallback++;
+            }
+            if (mem.pts) return adjustFlow(s, mem.pts, sp.flowBase || {}, lenOverride, styOverride);
+          }
+        } catch (e) { if (!ST.err) console.warn(TAG + ' 가닥 만들기 실패 — 마네킹 뼈대로', e); ST.err = String(e && e.message || e); }
+      }
+    }
+    return prevAdj.apply(this, arguments);
+  };
+  else console.warn(TAG + ' adjustStrandGeom을 못 찾아 표를 못 겁니다');
+
+  /* 걸 때: 이 스타일의 표로 · 섹션 길이 자동 맞추기는 건너뜀(스펙의 tipAt/lenCm을 잠깐 가리고, 길이 슬라이더는 flowLen으로) */
+  var innerApply = W.applyStyleSpec;
+  if (typeof innerApply === 'function') W.applyStyleSpec = function (id) {
+    var save = pendingId, sp = null, hid = null;
+    pendingId = id; refreshActive(); ST.shaped = 0; ST.fallback = 0; ST.err = null;
+    try { sp = activeSpec(); } catch (e) { sp = null; }
+    if (sp) { hid = { tipAt: sp.tipAt, lenCm: sp.lenCm, lenFallback: sp.lenFallback }; sp.tipAt = undefined; sp.lenCm = undefined; if (sp.flowLen) sp.lenFallback = sp.flowLen; }
+    try { return innerApply.apply(this, arguments); }
+    finally {
+      if (hid) { sp.tipAt = hid.tipAt; sp.lenCm = hid.lenCm; sp.lenFallback = hid.lenFallback; if (sp.tipAt === undefined) delete sp.tipAt; if (sp.lenCm === undefined) delete sp.lenCm; if (sp.lenFallback === undefined) delete sp.lenFallback; }
+      pendingId = save; refreshActive();
+      try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
+      if (hid) needLine = true;
+    }
+  };
+  // 걸고 난 뒤 가닥을 처음 다 만든 자리에서 한 줄 찍음
+  var needLine = false, innerCA = W.computeAdjustedHair3DStrands;
+  if (typeof innerCA === 'function') W.computeAdjustedHair3DStrands = function () {
+    var out = innerCA.apply(this, arguments);
+    if (needLine && !pendingId && (ST.shaped + ST.fallback) > 0) { needLine = false; try { console.log(FS.applyLine()); } catch (e) {} }
+    return out;
+  };
+  var innerClear = W.clearStyleSpec;
+  if (typeof innerClear === 'function') W.clearStyleSpec = function () {
+    try { return innerClear.apply(this, arguments); }
+    finally { refreshActive(); try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {} }
+  };
+  // 미리 만든 헤어의 서명 — 표가 걸렸는지/켜졌는지가 바뀌면 다시
+  var origFS = W.adjFilterSig;
+  if (typeof origFS === 'function') W.adjFilterSig = function () { var f = null; try { f = FS.active(); } catch (e) {} return origFS.apply(this, arguments) + '|fl' + (f ? f.n + ':' + f.d.length : 0); };
+
+  /* [현재 모델을 스타일로 등록] — 지금 걸린 표를 새 스펙에 그대로 · 지금 섹션 길이 슬라이더 값을 flowLen에 */
+  var innerBuildSpec = W.buildSpecFromCurrent;
+  if (typeof innerBuildSpec === 'function') W.buildSpecFromCurrent = function () {
+    var spec = innerBuildSpec.apply(this, arguments);
+    try {
+      var sp = activeSpec();
+      if (spec && sp && FS.save) {
+        spec.flow = sp.flow; spec.flowBase = JSON.parse(JSON.stringify(sp.flowBase || {})); spec.flowLen = {};
+        secOrder().forEach(function (sec) { var c = state.sections && state.sections[sec]; if (c && typeof c.length === 'number') spec.flowLen[sec] = c.length; });
+        console.log(TAG + ' 스타일 등록 — 지금 걸린 표를 같이 실었습니다(' + Math.round(sp.flow.d.length / 1024) + 'KB · 섹션 길이 슬라이더 ' + secOrder().map(function (k) { return k + ' ' + spec.flowLen[k]; }).join(' · ') + ')');
+      }
+    } catch (e) { console.warn(TAG + ' 등록에 표 싣기 실패', e); }
+    return spec;
+  };
+  /* 저장소가 차서 표가 든 스타일이 안 들어갔으면 알림 */
+  var innerSave = W.saveCustomStylesToStorage;
+  if (typeof innerSave === 'function') W.saveCustomStylesToStorage = function () {
+    var r = innerSave.apply(this, arguments);
+    try {
+      var want = STYLES.filter(function (s) { return s.isCustom; }), raw = localStorage.getItem('gyeol_customStyles') || '', last = want[want.length - 1];
+      var kb = Math.round(raw.length / 1024), nFlow = want.filter(function (s) { return s.spec && s.spec.flow; }).length;
+      if (last && raw.indexOf('"' + last.id + '"') < 0) {
+        ST.saveWarn = '저장소가 차서 "' + last.name + '"이(가) 저장되지 않았습니다(지금 ' + kb + 'KB) — 안 쓰는 스타일을 지워 주세요';
+        console.warn(TAG + ' ' + ST.saveWarn);
+        try { if (typeof showToast === 'function') showToast(ST.saveWarn); } catch (e) {}
+      } else { ST.saveWarn = null; if (nFlow) console.log(TAG + ' 저장소 — 등록 스타일 ' + want.length + '개(표가 든 것 ' + nFlow + '개) · ' + kb + 'KB'); }
+    } catch (e) {}
+    return r;
+  };
+
+  FS.applyLine = function () {
+    var f = null; try { f = FS.active(); } catch (e) {}
+    if (!f) return TAG + ' 지금 걸린 스타일에는 표가 없습니다(숫자만으로 걸림)';
+    return TAG + ' 걸림 — 표 ' + f.n + '무리 · ' + Math.round(f.d.length / 1024) + 'KB · 표대로 만든 마네킹 가닥 ' + ST.shaped + '개' + (ST.fallback ? ' · 표가 없는 자리라 마네킹 뼈대 그대로 ' + ST.fallback + '개' : '') +
+      ' · 섹션 길이 자동 맞추기 건너뜀 · 앞머리 내려 심기 안 탐' + (ST.err ? ' · ⚠ ' + ST.err : '') + ' — 끄기 FLOW_SPEC.on=false 후 스타일 다시 걸기';
+  };
+  FS.lines = function () {
+    var b = ST.built, L = [];
+    if (!b) L.push(TAG + ' ' + (FS.save ? '대기 — 원본 머리를 다시 기르면 표를 뽑습니다' : '싣기 꺼짐(FLOW_SPEC.save=false)'));
+    else {
+      var cm = b.cm, s = b.stats, f = b.fid;
+      L.push(TAG + ' 다시 기른 가닥 ' + s.strands + '개에서 뽑음(' + b.at + ' · ' + Math.round(b.ms) + 'ms) — 두피 칸 ' + s.cells + '개(가닥이 ' + FS.minCell + '개 미만이라 뺀 칸 ' + s.skipped + ') · 그중 두 무리로 가른 칸(가르마 등) ' + s.split +
+        ' · 길이 칸 ' + b.nb + ' · 스펙에 싣는 크기 ' + Math.round(b.bytes / 1024) + 'KB');
+      if (f && f.n) L.push('    표로 다시 만든 가닥 ↔ 원래 가닥(' + f.n + '개 표본 · 길이는 원래 길이로): 가닥 전체 평균 거리 ' + (f.meanMed * cm).toFixed(1) + 'cm(중앙값) · ' + (f.meanP90 * cm).toFixed(1) + 'cm(90%) | 끝 거리 ' +
+        (f.tipMed * cm).toFixed(1) + ' · ' + (f.tipP90 * cm).toFixed(1) + 'cm' + (f.miss ? ' · 표가 없어 못 만든 가닥 ' + f.miss : '') +
+        ' — 90% 쪽이 큰 것은 잔머리(표는 칸의 결만 담음)라 정상이고, 중앙값이 크면 표가 머리 모양을 못 담은 것입니다');
+    }
+    try { if (FS.active()) L.push(FS.applyLine()); } catch (e) {}
+    if (ST.saveWarn) L.push(TAG + ' ⚠ ' + ST.saveWarn);
+    return L;
+  };
+  var ppl = W.perfPanelLines;
+  if (typeof ppl === 'function') W.perfPanelLines = function () {
+    var L = ppl.apply(this, arguments) || [];
+    try { L = L.concat(FS.lines()); } catch (e) {}
+    return L;
+  };
+  console.log(TAG + ' 설치 — 원본 머리의 스펙에 결 표·길이 지도를 싣고, 표가 든 스타일은 마네킹 가닥을 표대로 만듭니다(다른 손님 두상에도). 끄기 FLOW_SPEC.on=false · 싣지 않기 FLOW_SPEC.save=false');
+})();
