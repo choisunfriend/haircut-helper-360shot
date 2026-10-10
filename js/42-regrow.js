@@ -163,6 +163,7 @@
     curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
     curlRadius: false,          // (2026-10-06r) 끔 — 켜면 컬이 죽음(웨이브 100 + 로드 ×1.29 = 곧은 막대). q에서 다시 켠 것은 잘못 읽은 것 — 머리말 v8 참고
+    curlAmp: true, curlAmpK: 1.15, curlAmpWavy: 0.25,   // (2026-10-10h) 컬 반경을 결 선의 흔들림 폭으로 직접 잼(합성 컬 진폭 3~25px에서 실제의 74~96% → ×1.15) · 흔들리는 선이 이 비율 이상일 때만 · false = 예전 어림식
     curlRk: 5, curlR0: 3.3,     // 컬 반경(px) = curlRk × (dHalf − curlR0)  (⚠ 합성 타래 무늬로 맞춘 어림)
     curlRminPx: 5,              // 이보다 작게는 구분 못 함(결 방향장의 창 크기)
     curlRodScaleMax: 3,         // 로드 최대를 넘길 수 있는 배수 상한
@@ -1167,6 +1168,57 @@
     return { c1: c1, dHalf: dHalf, n: N[1], flat: dHalf == null };      // flat: 끝까지 가도 안 달라짐(거의 직선)
   }
   G.curvStats = curvStats;
+  function curlAmp(angle, coh, mask, Wd, Hd) {      // (2026-10-10h) 사진 결을 따라 선을 그어 그 선이 옆으로 흔들리는 폭(진폭) = 컬 반경(px) · 흔들림 한 번 길이 = 한 바퀴 간격
+    var minCoh = 0.2, Lh = 160, want = 1200, n = Wd * Hd, cnt = 0, i, k;
+    for (i = 0; i < n; i++) if (mask[i] && coh[i] >= minCoh) cnt++;
+    if (cnt < 300) return null;
+    var stride = Math.max(1, Math.floor(cnt / want)), amps = [], lams = [], tried = 0, waved = 0, kk = 0;
+    var PX = new Float64Array(2 * Lh + 1), PY = new Float64Array(2 * Lh + 1); var CX = new Float64Array(2 * Lh + 2), CY2 = new Float64Array(2 * Lh + 2);
+    function trace(x0, y0, t0, sg, out, off) {      // 한쪽으로 따라감 → 몇 점 갔나
+      var x = x0 + 0.5, y = y0 + 0.5, ux = Math.cos(t0) * sg, uy = Math.sin(t0) * sg, d;
+      for (d = 1; d <= Lh; d++) {
+        x += ux; y += uy;
+        var xi = x | 0, yi = y | 0; if (xi < 0 || yi < 0 || xi >= Wd || yi >= Hd) return d - 1;
+        var j = yi * Wd + xi; if (!mask[j] || coh[j] < minCoh * 0.5) return d - 1;
+        var t = angle[j], vx = Math.cos(t), vy = Math.sin(t);
+        if (vx * ux + vy * uy < 0) { vx = -vx; vy = -vy; }
+        ux = 0.5 * ux + 0.5 * vx; uy = 0.5 * uy + 0.5 * vy; var ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+        out(off + sg * d, x, y);
+      }
+      return Lh;
+    }
+    function dev(a, b, Wn) {                          // 이동 평균 뼈대에서 벗어난 거리(부호) → [진폭, 파장, 부호 바뀜 수]
+      var m = b - a + 1, h = Math.max(2, Wn >> 1), s, dv = [], sum = 0, ch = 0, prev = 0;
+      for (s = a; s <= b; s++) { CX[s + 1] = CX[s] + PX[s]; CY2[s + 1] = CY2[s] + PY[s]; }
+      for (s = a + h; s <= b - h; s++) {
+        var mx = (CX[s + h + 1] - CX[s - h]) / (2 * h + 1), my = (CY2[s + h + 1] - CY2[s - h]) / (2 * h + 1);
+        var tx = PX[Math.min(b, s + h)] - PX[Math.max(a, s - h)], ty = PY[Math.min(b, s + h)] - PY[Math.max(a, s - h)], tl = Math.hypot(tx, ty) || 1;
+        var e = ((PX[s] - mx) * (-ty) + (PY[s] - my) * tx) / tl; dv.push(e);
+      }
+      if (dv.length < 20) return null;
+      var mean = 0; dv.forEach(function (e) { mean += e; }); mean /= dv.length;
+      dv.forEach(function (e) { e -= mean; sum += Math.abs(e); var sgn = e > 0 ? 1 : -1; if (prev && sgn !== prev) ch++; prev = sgn; });
+      return [sum / dv.length * Math.PI / 2, ch > 0 ? 2 * dv.length / ch : 1e9, ch];
+    }
+    for (i = 0; i < n; i++) {
+      if (!mask[i] || coh[i] < minCoh) continue;
+      if (kk++ % stride) continue;
+      var x0 = i % Wd, y0 = (i / Wd) | 0, t0 = angle[i];
+      PX[Lh] = x0 + 0.5; PY[Lh] = y0 + 0.5;
+      var put = function (idx, x, y) { PX[idx] = x; PY[idx] = y; };
+      var f = trace(x0, y0, t0, 1, put, Lh), bk = trace(x0, y0, t0, -1, put, Lh);
+      var a = Lh - bk, b = Lh + f; if (b - a < 50) continue;
+      tried++;
+      var r1 = dev(a, b, 40); if (!r1) continue;
+      var Wn = Math.max(12, Math.min(120, Math.round(r1[1] || 40))), r2 = dev(a, b, Wn) || r1;
+      if (r2[2] >= 3 && r2[0] >= 1.5) { waved++; amps.push(r2[0]); lams.push(r2[1]); }
+    }
+    if (tried < 50) return null;
+    amps.sort(function (p, q) { return p - q; }); lams.sort(function (p, q) { return p - q; });
+    var med = amps.length ? amps[amps.length >> 1] : 0, lam = lams.length ? lams[lams.length >> 1] : 0;
+    return { ampPx: med, lamPx: lam, n: amps.length, tried: tried, wavy: waved / tried };
+  }
+  G.curlAmpFn = curlAmp;
   (function () {
     var pend = null;
     var oEx = W.extractHairMask;
@@ -1175,14 +1227,14 @@
     if (typeof oF === 'function') W.computeHairOrientationField = function (px, mask, Wd, Hd) {
       pend = null;
       var f = oF.apply(this, arguments);
-      try { if (f && f.angle && f.coherence) { var cs = curvStats(f.angle, f.coherence, mask, Wd, Hd); if (cs) pend = { w: Wd, h: Hd, cs: cs }; } } catch (e) { pend = null; }
+      try { if (f && f.angle && f.coherence) { var cs = curvStats(f.angle, f.coherence, mask, Wd, Hd); if (cs) { pend = { w: Wd, h: Hd, cs: cs }; if (G.curlAmp) { try { pend.amp = curlAmp(f.angle, f.coherence, mask, Wd, Hd); } catch (e2) {} } } } } catch (e) { pend = null; }
       return f;
     };
     var oM = W.measureViewHairIdentity;
     if (typeof oM === 'function') W.measureViewHairIdentity = function (a) {
       var id = oM.apply(this, arguments);
       try {
-        if (id && pend && a && pend.w === a.w && pend.h === a.h) { id.curlDHalf = pend.cs.dHalf; id.curlFlat = pend.cs.flat; id.curlC1 = pend.cs.c1; id.curlRn = pend.cs.n; }
+        if (id && pend && a && pend.w === a.w && pend.h === a.h) { id.curlDHalf = pend.cs.dHalf; id.curlFlat = pend.cs.flat; id.curlC1 = pend.cs.c1; id.curlRn = pend.cs.n; if (pend.amp) { id.curlAmpPx = pend.amp.ampPx; id.curlLamPx = pend.amp.lamPx; id.curlWavy = pend.amp.wavy; id.curlAmpN = pend.amp.n; } }
       } catch (e) {}
       pend = null;
       return id;
@@ -1224,9 +1276,11 @@
         seen++;
         if (id.curlFlat) { flat++; out.rViews.push({ a: a, flat: true }); return; }
         var cpp = cmPerMaskPx(a); if (!(cpp > 0)) { out.rViews.push({ a: a, dHalf: id.curlDHalf, noScale: true }); return; }
-        var rpx = G.curlRk * (id.curlDHalf - G.curlR0), floor = !(rpx > G.curlRminPx);
-        if (floor) rpx = G.curlRminPx;
-        out.rViews.push({ a: a, dHalf: id.curlDHalf, rpx: rpx, cm: rpx * cpp, floor: floor });
+        var rpx = G.curlRk * (id.curlDHalf - G.curlR0), floor = !(rpx > G.curlRminPx), how = 'dHalf';
+        // (2026-10-10h) 사진 결을 따라 그은 선의 흔들림 폭(진폭)으로 직접 잰 반경 — 흔들리는 선이 충분하면 이것을 씀
+        if (G.curlAmp && id.curlAmpPx > 0 && id.curlWavy >= G.curlAmpWavy && id.curlAmpN >= 60) { rpx = id.curlAmpPx * G.curlAmpK; floor = false; how = 'amp'; }
+        else if (floor) rpx = G.curlRminPx;
+        out.rViews.push({ a: a, dHalf: id.curlDHalf, rpx: rpx, cm: rpx * cpp, floor: floor, how: how, wavy: id.curlWavy, lamCm: id.curlLamPx ? id.curlLamPx * cpp : null });
         rs.push(rpx * cpp);
       });
       if (!seen) out.rNote = '굵기를 잰 뷰가 없음(사진을 다시 분석하면 잽니다) — 웨이브 50';
@@ -1335,7 +1389,7 @@
       (pc.value > 0 ? ' · 편 길이 = 보이는 길이 × ' + (1 / curlRemain(pc.value)).toFixed(2) : ''));
     if (pc.rViews && (pc.rViews.length || pc.rNote)) L.push('  컬 굵기 ' + (pc.rCm > 0 ? '반경 ' + pc.rCm.toFixed(1) + 'cm(뷰 중앙값) → ' + (G.curlRadius ? '웨이브 ' + pc.wave +
       (pc.rodScale > 1 ? ' + 로드 ×' + pc.rodScale.toFixed(2) + '(다시 기른 가닥에만)' : '') + (pc.rodCm ? ' · 로드 반경 ' + pc.rodCm.toFixed(1) + 'cm' : '') : '꺼짐(REGROW.curlRadius=false) — 웨이브 50') : (pc.rNote || '못 잼')) +
-      (pc.rViews.length ? ' · ' + pc.rViews.map(function (v) { return v.a + ' ' + (v.flat ? '직선' : v.noScale ? 'dHalf ' + v.dHalf.toFixed(1) + 'px(배율 없음)' : v.cm.toFixed(1) + 'cm(dHalf ' + v.dHalf.toFixed(1) + 'px' + (v.floor ? ' — 하한, 이보다 잔 컬일 수 있음' : '') + ')'); }).join(' · ') : '') +
+      (pc.rViews.length ? ' · ' + pc.rViews.map(function (v) { return v.a + ' ' + (v.flat ? '직선' : v.noScale ? 'dHalf ' + v.dHalf.toFixed(1) + 'px(배율 없음)' : v.cm.toFixed(1) + 'cm(' + (v.how === 'amp' ? '결 선 흔들림 폭으로 잼 · 흔들리는 선 ' + Math.round((v.wavy || 0) * 100) + '%' + (v.lamCm ? ' · 한 바퀴 길이 ' + v.lamCm.toFixed(1) + 'cm' : '') + ' · ' : '') + 'dHalf ' + v.dHalf.toFixed(1) + 'px' + (v.floor ? ' — 하한, 이보다 잔 컬일 수 있음' : '') + ')'); }).join(' · ') : '') +
       ' · 식: 반경px = ' + G.curlRk + '×(dHalf−' + G.curlR0 + ') (어림)');
     return L;
   };
@@ -1424,5 +1478,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010g — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010h — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
