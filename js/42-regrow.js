@@ -142,7 +142,10 @@
     longPct: 0.95, longMul: 1.3,  // 긴 머리(어깨 아래로 내려오는 가닥이 longShare 넘게 있음)는 넉넉히
     longShare: 0.1,
     stubCm: 1.2,        // (2026-10-10e) 안 뒤집은 얇은 자리(옆·목덜미 머리선)에 심는 짧은 머리 길이(cm) · 0 = 안 심음
-    polDown: 1.2,       // (2026-10-10d) 두피 위에서 결(앞뒤 없는 선)의 앞뒤를 고를 때 직전 방향 + 내리막을 이 무게로 섞음 — 한 번 위로 가면 계속 위로 가며 두상을 감던 것(긴 가닥의 걸음 절반이 오르막) · 0 = 예전(직전 방향만)
+    polDown: 2.5,       // (2026-10-10f) 두피 위에서 결(앞뒤 없는 선)의 앞뒤를 고를 때 비탈을 거꾸로 오르는 쪽에만 이만큼 벌점(비탈 기울기에 비례) — 한 번 위로 가면 계속 위로 가며 두상을 감던 것. 옆으로 흐르는 결(가마·가르마)은 안 건드림 · 0 = 예전(직전 방향만)
+    glossSkip: true,    // (2026-10-10f) 광택 보정 — 머리색보다 많이 밝은 자리(광택 띠)에서 수평에 가까운 결은 안 읽음(광택 띠 가장자리를 결로 잘못 읽은 것) · false = 끔
+    glossLo: 0.35,      // 광택 판정: (밝기 − 머리색 밝기) ÷ (255 − 머리색 밝기)가 이 값 이상
+    glossFlat: 0.5,     // 수평에 가까움: |sin(결 각)| 이 값 미만(±30°)
     flipThickCm: 4,     // (2026-10-10c) 출발 방향 뒤집기(아래에 머리가 없으면 위로)는 뿌리 자리 머리 두께가 이 cm 이상일 때만 — 세운 앞머리. 얇으면(눕힌 머리·목덜미 짧은 머리) 안 뒤집음 · 0 = 예전처럼 늘 뒤집음
     trace: true,        // (2026-10-10b) 걸음 기록 — 기본 켬(시험판). 끄기 REGROW.trace=false · 켜면 가닥마다 걸음별로 무엇이 방향을 정했는지 남김(60번 내보내기에 실림) · 머리 모양은 그대로
     traceEvery: 25,     // 기록할 보통 가닥 표본 간격(두피 위에서 길이 상한까지 간 가닥은 전부)
@@ -238,13 +241,19 @@
     var yBody = CY - 0.7 * Es.b;
 
     // 사진별 카메라
+    function lumOfCss(cs) {                                               // '#rrggbb' · 'rgb(r,g,b)' → 밝기(0~255) · 모르면 50
+      try { var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(cs || ''), r, g, b;
+        if (m) { r = parseInt(m[1], 16); g = parseInt(m[2], 16); b = parseInt(m[3], 16); } else { m = /(\d+)\D+(\d+)\D+(\d+)/.exec(cs || ''); if (!m) return 50; r = +m[1]; g = +m[2]; b = +m[3]; }
+        return 0.299 * r + 0.587 * g + 0.114 * b; } catch (e) { return 50; }
+    }
     var cams = [];
     probe.cams.forEach(function (c) {
       var mi = state.hairMasks && state.hairMasks[c.angle];
       if (!mi || !c.smp || !(c.iw > 0) || !(c.ih > 0)) return;
       var mw = mi.maskW || mi.w, mh = mi.maskH || mi.h;
       cams.push({ angle: c.angle, R: c.R, cx: c.cx, s: c.s, sy: c.sy, crownY: c.crownY, smp: c.smp, iw: c.iw, ih: c.ih,
-        ori: mi.orientation || null, mw: mw, kx: mw / mi.w, ky: mh / mi.h, tap: Math.max(2, G.tapPx * c.iw / 800) });
+        ori: mi.orientation || null, mw: mw, kx: mw / mi.w, ky: mh / mi.h, tap: Math.max(2, G.tapPx * c.iw / 800),
+        rgb: mi.photoRGB || null, mh: mh, hairLum: lumOfCss(mi.avgColor) });
     });
     if (!cams.length) return { err: '쓸 수 있는 사진 없음' };
 
@@ -321,6 +330,7 @@
 
     /* 그 자리의 결 방향을 사진들에서 직접 읽어 3D 접선 방향으로. ref가 있으면 그쪽 부호로 맞춤 */
     var TRF = null;   // 걸음 기록: flow()가 이번에 쓴 사진들
+    var glossN = 0;   // 광택 띠라 안 읽은 결 표본 수
     var polW = 0;     // (2026-10-10d) 이번 걸음의 내리막 무게(두피 위 · 뒤집힌 뿌리 아님일 때만 G.polDown)
     function flow(p, n, ref, flat) {
       if (TRF) { TRF.nc = 0; TRF.best = -1; TRF.bw = 0; TRF.coh = 0; TRF.spr = 0; TRF.dirs = []; }
@@ -335,6 +345,13 @@
         if (!(cam.smp.at(o.ix, o.iy) > 0)) continue;
         sm = sampleOrientation(cam.ori, o.ix * cam.kx, cam.mw, o.iy * cam.ky);
         if (!sm || !(sm.coherence >= G.minCoh)) continue;
+        if (G.glossSkip && cam.rgb && Math.abs(Math.sin(sm.angle)) < G.glossFlat) {   // (2026-10-10f) 광택 띠의 수평 결은 안 읽음
+          var gx = Math.floor(o.ix * cam.kx), gy = Math.floor(o.iy * cam.ky);
+          if (gx >= 0 && gy >= 0 && gx < cam.mw && gy < cam.mh) {
+            var gi = (gy * cam.mw + gx) * 3, lu = 0.299 * cam.rgb[gi] + 0.587 * cam.rgb[gi + 1] + 0.114 * cam.rgb[gi + 2], gl = (lu - cam.hairLum) / Math.max(20, 255 - cam.hairLum);
+            if (gl >= G.glossLo) { glossN++; continue; }
+          }
+        }
         ncx = R[0] * n.x + R[1] * n.y + R[2] * n.z; ncy = R[3] * n.x + R[4] * n.y + R[5] * n.z;
         dX = Math.cos(sm.angle) * cam.s; dY = -Math.sin(sm.angle) * cam.sy;
         dZ = -(dX * ncx + dY * ncy) / ncz;
@@ -346,9 +363,10 @@
         mx /= l; my /= l; mz /= l;
         if (ref) {
           dot = mx * ref.x + my * ref.y + mz * ref.z;
-          if (polW > 0) {                                                   // 내리막 = 아래(0,-1,0)를 이 자리 두피면에 놓은 방향 · 정수리처럼 평평한 곳은 저절로 약해짐
-            var kd = -n.y, ddx = -kd * n.x, ddy = -1 - kd * n.y, ddz = -kd * n.z;
-            dot += polW * (mx * ddx + my * ddy + mz * ddz);
+          if (polW > 0) {                                                   // (2026-10-10f) 오르막에만 벌점 — 내리막 = 아래(0,-1,0)를 이 자리 두피면에 놓은 방향(정수리처럼 평평한 곳은 짧아져 저절로 약해짐)
+            var kd = -n.y, ddx = -kd * n.x, ddy = -1 - kd * n.y, ddz = -kd * n.z, b = mx * ddx + my * ddy + mz * ddz;
+            // 두 쪽 점수: 이 쪽 = dot + polW·min(0, b) · 반대쪽 = −dot + polW·min(0, −b). 옆으로 흐르는 결(b≈0 · 가마·가르마)은 그대로, 비탈에서 거꾸로 오르는 쪽만 막음
+            dot = (dot + polW * Math.min(0, b)) - (-dot + polW * Math.min(0, -b));
           }
         }
         else if (wsum > 0) dot = mx * ax + my * ay + mz * az;
@@ -693,7 +711,7 @@
         S = G.stats = {
           ms: Math.round(now() - t0), n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
           lenMed: q(st.len, 0.5) * cm, lenP90: q(st.len, 0.9) * cm, kinkMed: q(st.kink, 0.5), kinkP90: q(st.kink, 0.9),
-          estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped, flipKept: st.flipKept || 0, flipSide: st.flipSide || 0, stubN: st.stub || 0,
+          estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped, flipKept: st.flipKept || 0, flipSide: st.flipSide || 0, stubN: st.stub || 0, glossN: glossN,
           isLong: isLong, capTxt: Object.keys(cap).map(function (k) { return k + ' ' + n1(cap[k] * cm); }).join(' · '),
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
           cams: cams.map(function (c) { return c.angle; }).join(','),
@@ -1375,7 +1393,7 @@
     L.push('  뿌리 분포 — ' + secs);
     L.push('  길이 ' + n1(s.lenMed) + '/' + n1(s.lenP90) + 'cm(중앙값/p90) · 꺾임 ' + n1(s.kinkMed) + '°/' + n1(s.kinkP90) + '° · 결을 사진에서 못 읽고 이어 간 걸음 ' + n1(s.estPct) + '%');
     L.push('  길이 상한(' + (s.isLong ? '긴 머리 — 넉넉히' : '짧은 머리 — 섹션 중앙값×' + G.lenMul) + ') cm: ' + s.capTxt);
-    L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음 · 두께 ' + G.flipThickCm + 'cm 이상) ' + s.flipped + ' · 얇아서 안 뒤집은 뿌리 ' + (s.flipKept || 0) + '(그중 앞 헤어라인에서 옆으로 눕힌 ' + (s.flipSide || 0) + ' · 짧게 심은 ' + (s.stubN || 0) + ')' + ' · 결의 앞뒤에 내리막 섞기 ' + G.polDown);
+    L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음 · 두께 ' + G.flipThickCm + 'cm 이상) ' + s.flipped + ' · 얇아서 안 뒤집은 뿌리 ' + (s.flipKept || 0) + '(그중 앞 헤어라인에서 옆으로 눕힌 ' + (s.flipSide || 0) + ' · 짧게 심은 ' + (s.stubN || 0) + ')' + ' · 비탈 거꾸로 오르기 벌점 ' + G.polDown + (G.glossSkip ? ' · 광택 띠라 안 읽은 결 ' + (s.glossN || 0) : ''));
     if (s.backFix) L.push('  뒷머리 앞쏠림 막기 — 뒤쪽에서 두피를 벗어난 가닥 ' + s.backN + '개(길이 중앙값 ' + n1(s.backLenMed) + 'cm) · 앞으로 가려던 걸음 ' + s.backFwd + '회 막음 · 뒤 사진 끝 높이까지 이어 간 걸음 ' + s.backKeep +
       (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
     L.push('  곧게 늘어뜨리기(긴 머리 · 목 아래): ' + (!G.hangDown ? '꺼짐' : !s.isLong ? '짧은 머리라 안 씀' : !s.hang ? '끝 높이를 낼 사진 가닥이 모자라 안 씀' :
@@ -1403,5 +1421,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010e — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010f — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
