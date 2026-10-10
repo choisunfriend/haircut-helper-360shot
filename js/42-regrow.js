@@ -148,6 +148,7 @@
     glossFlat: 0.5,
     glossNbr: 8,        // (2026-10-10i) 둘레 결을 볼 거리(마스크 px)     // 수평에 가까움: |sin(결 각)| 이 값 미만(±30°)
     flipThickCm: 1.8,   // (2026-10-10g) 4 → 1.8 — 실측 앞쪽 뿌리 두께: 넘겨 세운 남자 앞머리 중앙값 2.3cm · 눕힌 여자 앞머리 1.0cm
+    thinStopCm: 0.5, thinStopRoot: 1.2, thinStopAfter: 1.0,   // (2026-10-10j) 뿌리 두께가 thinStopRoot cm 이상인 가닥은 두께 thinStopCm 미만 자리(페이드)에 들어서면 멈춤(뿌리에서 thinStopAfter cm 지난 뒤) · 0 = 끔
     polSlopeLo: 0.35, polSlopeHi: 0.75,   // (2026-10-10i) 오르막 벌점은 비탈이 이 기울기(내리막 방향 길이 0~1) 사이에서 서서히 걸림 — 가마·정수리처럼 완만한 곳은 결 그대로 돎
     polThickLo: 1.4, polThickHi: 2.2,   // (2026-10-10g) 오르막 벌점을 뿌리 두께로 풂 — 이 cm 이하면 벌점 그대로 · 이 cm 이상(세운 머리·볼륨)이면 벌점 없음 · 사이는 서서히
     flipThickCm_note: 0,     // (2026-10-10c) 출발 방향 뒤집기(아래에 머리가 없으면 위로)는 뿌리 자리 머리 두께가 이 cm 이상일 때만 — 세운 앞머리. 얇으면(눕힌 머리·목덜미 짧은 머리) 안 뒤집음 · 0 = 예전처럼 늘 뒤집음
@@ -165,7 +166,7 @@
     curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
     curlRadius: false,          // (2026-10-06r) 끔 — 켜면 컬이 죽음(웨이브 100 + 로드 ×1.29 = 곧은 막대). q에서 다시 켠 것은 잘못 읽은 것 — 머리말 v8 참고
-    curlAmp: true, curlAmpK: 1.15, curlAmpWavy: 0.25,   // (2026-10-10h) 컬 반경을 결 선의 흔들림 폭으로 직접 잼(합성 컬 진폭 3~25px에서 실제의 74~96% → ×1.15) · 흔들리는 선이 이 비율 이상일 때만 · false = 예전 어림식
+    curlAmp: false, curlAmpK: 1.15, curlAmpWavy: 0.25,   // (2026-10-10j) 끔 — 실제 곱슬 사진에서 0.4cm로 작게 잼(큰 컬은 선이 타래 경계에서 끊겨 빠지고 잔물결만 남음) → 뽀글이. 고칠 때까지 예전 어림식   // (2026-10-10h) 컬 반경을 결 선의 흔들림 폭으로 직접 잼(합성 컬 진폭 3~25px에서 실제의 74~96% → ×1.15) · 흔들리는 선이 이 비율 이상일 때만 · false = 예전 어림식
     curlRk: 5, curlR0: 3.3,     // 컬 반경(px) = curlRk × (dHalf − curlR0)  (⚠ 합성 타래 무늬로 맞춘 어림)
     curlRminPx: 5,              // 이보다 작게는 구분 못 함(결 방향장의 창 크기)
     curlRodScaleMax: 3,         // 로드 최대를 넘길 수 있는 배수 상한
@@ -616,6 +617,8 @@
           var n2 = normalAt(F2), s2 = s + stp, h2 = u * thickAt(F2) * Math.min(1, s2 / ramp);
           var P2 = { x: F2.x + n2.x * h2, y: F2.y + n2.y * h2, z: F2.z + n2.z * h2 };
           var v2 = vote(P2); if (TS) { rec(0, !fl, 0); TS.push(v2 ? 1 : 0, P2.x, P2.y, P2.z); }
+          // (2026-10-10j) 사진 윤곽으로 잰 머리 두께가 거의 없는 자리(페이드·짧게 민 옆·뒤)로는 위에서 내려온 긴 머리가 못 덮음 — 덮었다면 윤곽이 두꺼웠을 것
+          if (G.thinStopCm > 0 && tCm0 >= G.thinStopRoot && s2 > G.thinStopAfter / cmU && thickAt(F2) * cmU < G.thinStopCm) { stop = 'mask'; st.thinStop = (st.thinStop || 0) + 1; break; }
           if (v2 === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
           pts.push(P2); F = F2; n = n2; P = P2; s = s2; sOn += stp; prev = tangent(dt, n2) || dt;
         } else {
@@ -732,7 +735,7 @@
         S = G.stats = {
           ms: Math.round(now() - t0), n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
           lenMed: q(st.len, 0.5) * cm, lenP90: q(st.len, 0.9) * cm, kinkMed: q(st.kink, 0.5), kinkP90: q(st.kink, 0.9),
-          estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped, flipKept: st.flipKept || 0, flipSide: st.flipSide || 0, stubN: st.stub || 0, glossN: glossN, glossKeep: glossKeep,
+          estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped, flipKept: st.flipKept || 0, flipSide: st.flipSide || 0, stubN: st.stub || 0, glossN: glossN, glossKeep: glossKeep, thinStop: st.thinStop || 0,
           isLong: isLong, capTxt: Object.keys(cap).map(function (k) { return k + ' ' + n1(cap[k] * cm); }).join(' · '),
           tMed: q(tv, 0.5), tP90: q(tv, 0.9), tMeasured: tStat.measured, tFilled: tStat.filled, tZero: tStat.zero, cells: NC,
           cams: cams.map(function (c) { return c.angle; }).join(','),
@@ -1467,7 +1470,7 @@
     L.push('  뿌리 분포 — ' + secs);
     L.push('  길이 ' + n1(s.lenMed) + '/' + n1(s.lenP90) + 'cm(중앙값/p90) · 꺾임 ' + n1(s.kinkMed) + '°/' + n1(s.kinkP90) + '° · 결을 사진에서 못 읽고 이어 간 걸음 ' + n1(s.estPct) + '%');
     L.push('  길이 상한(' + (s.isLong ? '긴 머리 — 넉넉히' : '짧은 머리 — 섹션 중앙값×' + G.lenMul) + ') cm: ' + s.capTxt);
-    L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음 · 두께 ' + G.flipThickCm + 'cm 이상) ' + s.flipped + ' · 얇아서 안 뒤집은 뿌리 ' + (s.flipKept || 0) + '(그중 앞 헤어라인에서 옆으로 눕힌 ' + (s.flipSide || 0) + ' · 짧게 심은 ' + (s.stubN || 0) + ')' + ' · 비탈 거꾸로 오르기 벌점 ' + G.polDown + '(뿌리 두께 ' + G.polThickLo + '~' + G.polThickHi + 'cm에서 풀림)' + (G.glossSkip ? ' · 광택 띠라 안 읽은 결 ' + (s.glossN || 0) + '(둘레와 같아 살린 것 ' + (s.glossKeep || 0) + ')' : ''));
+    L.push('  멈춘 이유 — 머리 영역 밖 ' + s.stopMask + ' · 길이 상한 ' + s.stopCap + ' · 걸음 수 상한 ' + s.stopMax + ' · 두피 밖으로 나가 늘어뜨린 가닥 ' + s.free + ' · 반대로 기른 뿌리(아래쪽에 머리 없음 · 두께 ' + G.flipThickCm + 'cm 이상) ' + s.flipped + ' · 얇아서 안 뒤집은 뿌리 ' + (s.flipKept || 0) + '(그중 앞 헤어라인에서 옆으로 눕힌 ' + (s.flipSide || 0) + ' · 짧게 심은 ' + (s.stubN || 0) + ')' + ' · 비탈 거꾸로 오르기 벌점 ' + G.polDown + '(뿌리 두께 ' + G.polThickLo + '~' + G.polThickHi + 'cm에서 풀림)' + (G.glossSkip ? ' · 페이드(두께 없는 자리) 앞에서 멈춘 가닥 ' + (s.thinStop || 0) + ' · 광택 띠라 안 읽은 결 ' + (s.glossN || 0) + '(둘레와 같아 살린 것 ' + (s.glossKeep || 0) + ')' : ''));
     if (s.backFix) L.push('  뒷머리 앞쏠림 막기 — 뒤쪽에서 두피를 벗어난 가닥 ' + s.backN + '개(길이 중앙값 ' + n1(s.backLenMed) + 'cm) · 앞으로 가려던 걸음 ' + s.backFwd + '회 막음 · 뒤 사진 끝 높이까지 이어 간 걸음 ' + s.backKeep +
       (s.backTipN >= 20 ? ' · 뒤 사진 머리 끝 = 정수리에서 ' + n1(s.backTipCm) + 'cm 아래(가닥 ' + s.backTipN + '개 기준)' : ' · 뒤 사진 가닥이 적어(' + s.backTipN + ') 끝 높이 기준은 안 씀'));
     L.push('  곧게 늘어뜨리기(긴 머리 · 목 아래): ' + (!G.hangDown ? '꺼짐' : !s.isLong ? '짧은 머리라 안 씀' : !s.hang ? '끝 높이를 낼 사진 가닥이 모자라 안 씀' :
@@ -1495,5 +1498,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010i — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010j — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
