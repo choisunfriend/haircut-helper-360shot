@@ -49,6 +49,7 @@
   var W = window, TAG = '[원본 대조]';
   var P = W.PHOTO_CHECK = Object.assign({
     on: true,
+    exportCols: 480,    // (2026-10-10a) 내보내기에 싣는 사진 칸(머리 영역·결) — 경계를 보려고 비교 칸보다 촘촘히
     cols: 200,          // 비교 칸: 사진 가로를 이 수로 나눔(800px 사진이면 칸 4px)
     tolCm: 0.6,         // 넘침·빔으로 치지 않는 여유(윤곽선 근처의 이 두께는 같다고 봄)
     extRun: 3,          // 윤곽 끝(위/아래/좌/우)을 잴 때 그 줄에 머리 칸이 이만큼은 있어야 끝으로 침(한두 가닥은 무시)
@@ -548,6 +549,26 @@
     try { H.pc = { trim: P.trim, fixDir: P.fixDir }; } catch (e) {}
     // 다시 기른 가닥(점은 하나 걸러)
     try { if (G && G.model && G.model.strands && G.model.strands.length) { var rg = packStrands(G.model.strands, 2, secIdx); add('rg.cnt', rg.cnt); add('rg.sec', rg.sec); add('rg.pts', rg.D, { stride: 2 }); H.regrown = { n: G.model.strands.length, on: !!G.on, CY: G.model.CY }; } else H.notes.push('다시 기른 모델 없음'); } catch (e) { H.notes.push('rg: ' + e.message); }
+    // (2026-10-10a) 다시 기른 가닥마다 멈춘 이유·두피 위/밖 길이 등(42번 rg) + 걸음 기록(REGROW.trace를 켜고 기른 경우) + 사진에서 잰 뿌리 밀도
+    try {
+      if (G && G.model && G.model.strands && G.model.strands.length) {
+        var ms = G.model.strands, nm = ms.length, STOP = { mask: 1, cap: 2, tip: 3, max: 4 }, MI = new Uint8Array(nm * 4), MF = new Float32Array(nm * 8), tr = [], trIdx = [], trLen = 0, j3, g3;
+        for (j3 = 0; j3 < nm; j3++) {
+          g3 = ms[j3] && ms[j3].rg; if (!g3) continue;
+          MI[j3 * 4] = STOP[g3.stop] || 0; MI[j3 * 4 + 1] = g3.free ? 1 : 0; MI[j3 * 4 + 2] = g3.est0 | 0; MI[j3 * 4 + 3] = g3.trace ? 1 : 0;
+          MF[j3 * 8] = g3.sOn || 0; MF[j3 * 8 + 1] = g3.sFree || 0; MF[j3 * 8 + 2] = g3.cap || 0; MF[j3 * 8 + 3] = g3.stp || 0;
+          MF[j3 * 8 + 4] = g3.nEst || 0; MF[j3 * 8 + 5] = g3.nBack || 0; MF[j3 * 8 + 6] = g3.nNeck || 0; MF[j3 * 8 + 7] = typeof g3.den === 'number' ? g3.den : -1;
+          if (g3.trace && trLen < 6e6) { tr.push(g3.trace); trIdx.push(j3, g3.trace.length); trLen += g3.trace.length; }
+        }
+        add('rg.mi', MI); add('rg.mf', MF);
+        H.rgMeta = { mi: 'stop(1영역밖 2길이상한 3끝높이 4걸음상한),free,est0,traced', mf: 'sOn,sFree,cap,stp,nEst,nBack,nNeck,den', traced: tr.length,
+          trace: '걸음마다 11값: 단계(0두피위 1두피밖 2곧게내림),결못읽음,쓴사진수,주로쓴사진(0..),결또렷함%,사진끼리벌어진각°,막음(1앞쏠림 2목),머리영역표,x,y,z' };
+        if (tr.length) { var TA = new Float32Array(trLen), o3 = 0; tr.forEach(function (a) { TA.set(a, o3); o3 += a.length; }); add('rg.trace', TA); add('rg.traceIdx', new Uint32Array(trIdx)); }
+        try { var cfgG = {}; Object.keys(G).forEach(function (k) { var v = G[k]; if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') cfgG[k] = v; }); H.regrowCfg = cfgG; } catch (e) {}
+      }
+      var ro = state._hair3Dneutral && state._hair3Dneutral.roots;
+      if (ro && ro.den) { add('roots.den', new Float32Array(ro.den)); if (ro.est) add('roots.est', new Uint8Array(ro.est)); H.roots = { NT: ro.NT, NP: ro.NP, b: ro.b }; }
+    } catch (e) { H.notes.push('rgMeta: ' + e.message); }
     // 지금 모델(마네킹이면 마네킹 뿌리) — 뿌리만
     try {
       var cur = state.hair3Dneutral;
@@ -568,7 +589,7 @@
     try {
       H.cams = [];
       cams.forEach(function (c, ci) {
-        var cols = Math.max(40, P.cols | 0), cell = c.iw / cols, gw = cols, gh = Math.max(1, Math.ceil(c.ih / cell)), M = new Uint8Array(gw * gh), A = new Int8Array(gw * gh), K = new Uint8Array(gw * gh), x, y, d;
+        var cols = Math.max(40, (P.exportCols || P.cols) | 0), cell = c.iw / cols, gw = cols, gh = Math.max(1, Math.ceil(c.ih / cell)), M = new Uint8Array(gw * gh), A = new Int8Array(gw * gh), K = new Uint8Array(gw * gh), x, y, d;
         for (y = 0; y < gh; y++) for (x = 0; x < gw; x++) {
           if (c.smp.at((x + 0.5) * cell, (y + 0.5) * cell) > 0) M[y * gw + x] = 1;
           if (typeof c.dirAt === 'function') { d = c.dirAt((x + 0.5) * cell, (y + 0.5) * cell); if (d) { A[y * gw + x] = Math.max(-127, Math.min(127, Math.round(wrapHalf(d[0]) / HALF * 127))); K[y * gw + x] = Math.max(0, Math.min(255, Math.round(d[1] * 255))); } }

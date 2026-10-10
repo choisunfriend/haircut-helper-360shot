@@ -141,6 +141,8 @@
     lenPct: 0.5, lenMul: 1.25,    // 짧은 머리 길이 상한 = 섹션별 원본 가닥 길이 중앙값 × 1.25
     longPct: 0.95, longMul: 1.3,  // 긴 머리(어깨 아래로 내려오는 가닥이 longShare 넘게 있음)는 넉넉히
     longShare: 0.1,
+    trace: true,        // (2026-10-10b) 걸음 기록 — 기본 켬(시험판). 끄기 REGROW.trace=false · 켜면 가닥마다 걸음별로 무엇이 방향을 정했는지 남김(60번 내보내기에 실림) · 머리 모양은 그대로
+    traceEvery: 25,     // 기록할 보통 가닥 표본 간격(두피 위에서 길이 상한까지 간 가닥은 전부)
     inertia: 0.55,      // 직전 방향을 섞는 비율(0 = 사진 결 그대로)
     smooth: 2,          // 다 기른 뒤 고르게 펴는 횟수
     liftK: 2.2,         // 짧은 머리 길이 어림 = 뿌리 자리 두께 × 이 값
@@ -315,7 +317,9 @@
     }
 
     /* 그 자리의 결 방향을 사진들에서 직접 읽어 3D 접선 방향으로. ref가 있으면 그쪽 부호로 맞춤 */
+    var TRF = null;   // 걸음 기록: flow()가 이번에 쓴 사진들
     function flow(p, n, ref, flat) {
+      if (TRF) { TRF.nc = 0; TRF.best = -1; TRF.bw = 0; TRF.coh = 0; TRF.spr = 0; TRF.dirs = []; }
       var ax = 0, ay = 0, az = 0, wsum = 0, i, cam, o, R, ncx, ncy, ncz, sm, pol, dX, dY, dZ, mx, my, mz, l, w, dot;
       for (i = 0; i < cams.length; i++) {
         cam = cams[i]; if (!cam.ori) continue;
@@ -341,9 +345,11 @@
         else { pol = 0; try { pol = flowPolarityFor(sm.angle, sm); } catch (e) {} dot = pol < 0 ? -1 : 1; }
         if (dot < 0) { mx = -mx; my = -my; mz = -mz; }
         w = ncz * ncz * sm.coherence;
+        if (TRF) { TRF.nc++; if (w > TRF.bw) { TRF.bw = w; TRF.best = i; TRF.coh = sm.coherence; } TRF.dirs.push(mx, my, mz, w); }
         ax += w * mx; ay += w * my; az += w * mz; wsum += w;
       }
       l = Math.hypot(ax, ay, az);
+      if (TRF && l > 1e-9 && TRF.dirs.length > 4) { var sp = 0, j2; for (j2 = 0; j2 < TRF.dirs.length; j2 += 4) { var c2 = (TRF.dirs[j2] * ax + TRF.dirs[j2 + 1] * ay + TRF.dirs[j2 + 2] * az) / l; var a2 = Math.acos(Math.max(-1, Math.min(1, c2))) * 57.3; if (a2 > sp) sp = a2; } TRF.spr = sp; }
       return l > 1e-9 ? { x: ax / l, y: ay / l, z: az / l } : null;
     }
     function mixDir(prev, d) {       // 관성
@@ -506,6 +512,11 @@
       var pts = [{ x: F.x, y: F.y, z: F.z }], P = F, s = 0, prev = null, miss = 0, k, d, dt, fl, estSteps = 0, steps = 0, free = false, stop = 'max';
       var bw = 0, myTip = null;                                             // backFix: 뒤쪽 정도(0~1) · 이 가닥이 내려갈 끝 높이
       var hangTip = null, hung = false;                                     // (v6) 곧게 내릴 끝 높이 · 곧게 내린 적 있음
+      var sOn = 0, sFree = 0, nBack = 0, nNeck = 0, nEst = 0, TS = G.trace ? [] : null;   // (2026-10-10a) 걸음 기록
+      function rec(ph, est, ex2) {                                          // 걸음 하나: [단계 0두피위 1두피밖 2곧게내림, 결 못읽음, 쓴 사진 수, 주로 쓴 사진, 그 사진 결 또렷함, 사진끼리 벌어진 각, 따로 막은 것(1 앞쏠림 2 목), 머리 영역 표, x,y,z]
+        if (!TS) return; var f2 = TRF || {}; TS.push(ph, est ? 1 : 0, f2.nc || 0, f2.best == null ? -1 : f2.best, Math.round((f2.coh || 0) * 100), Math.round(f2.spr || 0), ex2 || 0);
+      }
+      if (TS) TRF = {};
 
       // 첫 방향과 앞뒤
       fl = flow(F, n, null);
@@ -523,7 +534,7 @@
         steps++;
         if (!free) {
           // 두피 위 구간: 발은 두피면을 따라, 몸은 그 위 두께만큼 떠서
-          fl = flow(P, n, prev); if (!fl) estSteps++;
+          fl = flow(P, n, prev); if (!fl) { estSteps++; nEst++; }
           if (fl) fl = mixDir(prev, fl);
           dt = tangent(fl || prev, n) || prev;
           var F2 = onSurf({ x: F.x + dt.x * stp, y: F.y + dt.y * stp, z: F.z + dt.z * stp });
@@ -540,35 +551,38 @@
           }
           var n2 = normalAt(F2), s2 = s + stp, h2 = u * thickAt(F2) * Math.min(1, s2 / ramp);
           var P2 = { x: F2.x + n2.x * h2, y: F2.y + n2.y * h2, z: F2.z + n2.z * h2 };
-          if (vote(P2) === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
-          pts.push(P2); F = F2; n = n2; P = P2; s = s2; prev = tangent(dt, n2) || dt;
+          var v2 = vote(P2); if (TS) { rec(0, !fl, 0); TS.push(v2 ? 1 : 0, P2.x, P2.y, P2.z); }
+          if (v2 === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
+          pts.push(P2); F = F2; n = n2; P = P2; s = s2; sOn += stp; prev = tangent(dt, n2) || dt;
         } else {
           // 두피 밖 구간: 결 + 중력, 두상 안으로는 못 들어감
           var hangNow = hangTip != null && P.y < yBody;                     // (v6) 턱·목덜미 아래 — 사진 결을 안 읽고 곧게 아래로
+          var exB = 0;
           if (hangNow) {
+            if (TRF) { TRF.nc = 0; TRF.best = -1; TRF.coh = 0; TRF.spr = 0; }
             var hk = G.hangK, hx = prev.x * (1 - hk), hy = prev.y * (1 - hk) - hk, hz = prev.z * (1 - hk), hl = Math.hypot(hx, hy, hz) || 1;
             d = { x: hx / hl, y: hy / hl, z: hz / hl };
             if (!hung) { hung = true; st.hangN++; }
             st.hangSteps++;
           } else {
             var rr = Math.hypot(P.x, P.z), nc = rr > 1e-6 ? { x: P.x / rr, y: 0, z: P.z / rr } : n;
-            fl = flow(P, nc, prev, true); if (!fl) estSteps++;
+            fl = flow(P, nc, prev, true); if (!fl) { estSteps++; nEst++; }
             d = fl ? mixDir(prev, fl) : prev;
             if (bw > 0 && d.z > 0) {                                          // 뒷머리는 앞으로 못 감
               var fz = d.z * (1 - bw), fl2 = Math.hypot(d.x, d.y, fz);
               d = fl2 > 0.2 ? { x: d.x / fl2, y: d.y / fl2, z: fz / fl2 } : down;
-              st.backFwd++;
+              st.backFwd++; nBack++; exB = 1;
             }
             var gx = d.x * (1 - G.gravity), gy = d.y * (1 - G.gravity) - G.gravity, gz = d.z * (1 - G.gravity), gl = Math.hypot(gx, gy, gz) || 1;
             d = { x: gx / gl, y: gy / gl, z: gz / gl };
           }
           var Q = { x: P.x + d.x * stp, y: P.y + d.y * stp, z: P.z + d.z * stp };
           try { Q = ellipsoidPushOut(Q, Es.a * 1.02, Es.b * 1.02, Es.c * 1.02, CY); } catch (e) {}
-          var Qn = G.neckPush(Q); if (Qn !== Q) { Q = Qn; st.neckPush++; }
+          var Qn = G.neckPush(Q); if (Qn !== Q) { Q = Qn; st.neckPush++; nNeck++; exB = exB | 2; }
           if (hangNow) {                                                    // 끝 높이까지는 사진과 상관없이 이어 감
             if (Q.y <= hangTip) { miss = 0; stop = 'tip'; break; }
-            miss = 0;
-            pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; prev = d;
+            miss = 0; if (TS) { rec(2, 0, exB); TS.push(1, Q.x, Q.y, Q.z); }
+            pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; sFree += stp; prev = d;
             if (s >= Lcap) { stop = 'cap'; break; }
             continue;
           }
@@ -579,8 +593,9 @@
             var fx = Q.x / (Es.a * 1.3), fz2 = Q.z / (Es.c * 1.3);
             if (fx * fx + fz2 * fz2 <= 1) { vq = 1; st.backKeep++; }
           }
+          if (TS) { rec(1, !fl, exB); TS.push(vq ? 1 : 0, Q.x, Q.y, Q.z); }
           if (vq === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
-          pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; prev = d;
+          pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; sFree += stp; prev = d;
         }
         if (s >= Lcap) { stop = 'cap'; break; }
       }
@@ -591,7 +606,9 @@
       if (bw >= 0.5 || hung) { try { pts._rgKeep = true; } catch (e) {} }  // 조정 단계의 "사진 영역 밖 다듬기"가 이 가닥을 다시 자르지 않게
       var Larc = 0, ii; for (ii = 1; ii < pts.length; ii++) Larc += Math.hypot(pts[ii].x - pts[ii - 1].x, pts[ii].y - pts[ii - 1].y, pts[ii].z - pts[ii - 1].z);
       var qi = Math.min(pts.length - 1, 6), ex = pts[qi].x - pts[0].x, ey = pts[qi].y - pts[0].y, ez = pts[qi].z - pts[0].z, el = Math.hypot(ex, ey, ez) || 1;
-      var rg = { t: tRoot, free: free, L: Larc, tipY: pts[pts.length - 1].y, dx: ex / el, dy: ey / el, dz: ez / el };
+      var rg = { t: tRoot, free: free, L: Larc, tipY: pts[pts.length - 1].y, dx: ex / el, dy: ey / el, dz: ez / el,
+        stop: stop, sOn: sOn, sFree: sFree, nEst: nEst, nBack: nBack, nNeck: nNeck, steps: steps, cap: Lcap, stp: stp, cell: cellIdx, den: roots.den[cellIdx], est0: roots.est ? roots.est[cellIdx] : 0 };
+      if (TS) { TRF = null; if ((!free && (stop === 'cap' || stop === 'max')) || (st.n % Math.max(1, G.traceEvery | 0) === 0)) rg.trace = new Float32Array(TS); }
       if (stop === 'mask') st.stopMask++; else if (stop === 'cap') st.stopCap++; else if (stop === 'tip') st.stopTip++; else st.stopMax++;
       if (bw >= 0.5) st.backLen.push(Larc);
       st.steps += steps; st.est += estSteps;
@@ -1356,5 +1373,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")');
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010b — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
