@@ -38,12 +38,6 @@
  *   예전 값(컬 반경 × 1.4 = 0.7직경)은 눈대중이었습니다. 이제 뿌리 자리 = 컬 지름(사진 반경 × 2) × lockDia(1직경).
  *   구역의 "펌·베이스 폭" 슬라이더가 이 값을 키우고 줄입니다(기본 자리 = 1직경 · 끝까지 올리면 2직경 · 끝까지 내리면 0.5직경 · 구역마다 따로).
  *   판 전체(로드 길이 폭)를 한 타래로 묶지는 않았습니다 — 로드를 풀면 판은 지름 폭쯤의 타래 여러 개로 갈라지기 때문(영상의 완성 머리).
- * (2026-10-08d) 길잡이 펴기 — 사용자(3D 결과 영상): "앞머리 쪽은 타래가 더 생겼는데 나머지는 아닌데?"
- *   추정 원인(실제 가닥으로는 아직 못 봄 · 지어낸 가닥으로 재현): 앞머리는 두피 밖으로 늘어뜨린 가닥이라 뼈대가 곧고 나란함 → 컬이 타래로 보임.
- *     나머지는 곱슬 사진의 결을 따라 걸음마다 10°씩 꺾이며 두피 위를 헤매는 뼈대 → 타래로 모아도 타래 자체가 구불구불 서로 엇갈려 컬이 묻힘.
- *   지금: 길잡이의 길을 lockSmoothCm(3cm)만큼 고르게 폄(가는 쪽만 · 두피에서 뜬 높이는 그대로 → 부피 유지). 길잡이는 "여럿이 같이 가는 가닥 중 가장 긴 것".
- *         길잡이보다 긴 가닥은 남은 길을 제 모양대로 이어 감(예전: 곧은 막대로 뻗음 — 그림에서 확인된 흠).
- *   끄기: PHOTO_CURL.lockSmoothCm=0; PHOTO_CURL.refresh()
  * 확인한 것(실제 앱 코드를 브라우저에 올리고 · 가닥은 지어낸 것): 표의 숫자 · 그림으로 본 타래 모양 · 다른 화면(마네킹)의 가닥이 점 단위로 그대로인 것.
  * ⚠ 확인 못 한 것: 실제 사진. 사진에서 재는 반경 자체가 어림값입니다(42번 curlRk) — 굵기가 사진보다 크거나 작게 나오면 PHOTO_CURL.radiusK(기본 1)로 맞춥니다.
  *   마네킹에 표를 올린 원본(직모·약한 웨이브 — 58번)과 마네킹 스타일에는 걸리지 않습니다.
@@ -67,7 +61,6 @@
     lockPull: 0.85,      // 길잡이의 길로 당기는 정도(1 = 완전히 나란히)
     lockRootCm: 1.0,     // 뿌리에서 이만큼은 서서히(뿌리는 제자리)
     lockTaper: 0.45, lockTaperCm: 5,   // 끝으로 갈수록 타래가 모임: 뿌리 간격의 이 비율까지 · 이 길이에 걸쳐
-    lockSmoothCm: 3,     // 길잡이의 길을 이 길이(cm)만큼 고르게 편 뒤 타래를 모음(가는 쪽만 펴고 두피에서 뜬 높이는 지킴) — 0이면 예전처럼 살짝만(두 번)
     lockDot: 0.5,        // 길잡이와 가는 쪽이 이만큼은 같아야 같은 타래(아니면 그 칸의 둘째 타래 · 그것도 아니면 그대로)
     radiusK: 1,          // 사진에서 잰 반경에 곱하는 보정(굵기가 사진과 다르면 이것으로)
     waveMin: 30, waveMax: 90,
@@ -159,7 +152,7 @@
     return Math.max(PC.lockCmMin, Math.min(PC.lockCmMax, cm * baseOf(sec)));
   }
   function lockSig() {
-    var a = [PC.lockPull, PC.lockTaper, PC.lockDia, PC.lockSmoothCm, PC.lockRootCm, PC.lockTaperCm, PC.lockDot, PC.lockCm, PC.lockCmMin, PC.lockCmMax, PC.radiusK, S.rCm || 0];
+    var a = [PC.lockPull, PC.lockTaper, PC.lockDia, PC.lockCm, PC.lockCmMin, PC.lockCmMax, PC.radiusK, S.rCm || 0];
     try { if (PC.lockBase && state.sections) Object.keys(state.sections).sort().forEach(function (k) { a.push(k + '=' + (+baseOf(k)).toFixed(3)); }); } catch (e) {}
     return a.join(',');
   }
@@ -175,37 +168,22 @@
       var r = { s: s, p: p, a: a, f: feat(p, a, A) }; k = sc + '|' + Math.floor(p[0].x / c) + ',' + Math.floor(p[0].y / c) + ',' + Math.floor(p[0].z / c);
       var g = cells.get(k); if (!g) { g = []; cells.set(k, g); } g.push(r);
     }
-    var locks = 0, moved = 0, o = { x: 0, y: 0, z: 0 }, EL = null, ECY = 0;
-    try { EL = getScalpEllipsoid(); ECY = (typeof SCALP_CENTER_Y !== 'undefined' && isFinite(SCALP_CENTER_Y)) ? SCALP_CENTER_Y : (model.CY || 0); } catch (e) { EL = null; }
+    var locks = 0, moved = 0, o = { x: 0, y: 0, z: 0 };
     function make(G0) {                      // 한 무리 → 길잡이를 뽑아 타래로 · 남은 가닥을 돌려줌
       var m = G0.length, lim = Math.min(m, 40), st = m / lim, best = -1, bi = 0, x, y, cnt;
-      for (x = 0; x < lim; x++) { var ra = G0[Math.floor(x * st)]; cnt = 0; for (y = 0; y < lim; y++) if (fd(ra.f, G0[Math.floor(y * st)].f) >= 0.8) cnt++; ra.c = cnt; if (cnt > best) { best = cnt; bi = Math.floor(x * st); } }
-      if (PC.lockSmoothCm > 0) { var bl = 0; for (x = 0; x < lim; x++) { var rb = G0[Math.floor(x * st)], ll = rb.a[rb.p.length - 1]; if (rb.c >= best * 0.8 && ll > bl) { bl = ll; bi = Math.floor(x * st); } } }
+      for (x = 0; x < lim; x++) { var ra = G0[Math.floor(x * st)]; cnt = 0; for (y = 0; y < lim; y++) if (fd(ra.f, G0[Math.floor(y * st)].f) >= 0.8) cnt++; if (cnt > best) { best = cnt; bi = Math.floor(x * st); } }
       var Ld = G0[bi], rest = [], mem = [], j;
       for (j = 0; j < m; j++) (fd(G0[j].f, Ld.f) >= PC.lockDot ? mem : rest).push(G0[j]);
       if (mem.length < 2) return rest.length === m ? [] : rest;
       // 길잡이의 길을 두 번 고르게(한 가닥의 잔 꺾임이 타래 전체에 복사되지 않게)
       var lp = Ld.p.map(function (q) { return { x: q.x, y: q.y, z: q.z }; }), ps, q;
-      var nps = 2, kk0 = null, ekf = function (v) { var ex = v.x / EL.a, ey = (v.y - ECY) / EL.b, ez = v.z / EL.c; return Math.sqrt(ex * ex + ey * ey + ez * ez); };
-      if (PC.lockSmoothCm > 0 && lp.length > 3) {
-        var stp = Ld.a[lp.length - 1] / (lp.length - 1), sg = PC.lockSmoothCm / cu / Math.max(1e-6, stp); nps = Math.max(2, Math.min(600, Math.round(2 * sg * sg)));
-        if (EL) { kk0 = lp.map(ekf); for (ps = 0; ps < 6; ps++) for (q = 1; q < kk0.length - 1; q++) kk0[q] = (kk0[q - 1] + 2 * kk0[q] + kk0[q + 1]) / 4; }   // 두피에서 뜬 높이(부피)는 지킴 — 살짝만 고름
-      }
-      for (ps = 0; ps < nps; ps++) for (q = 1; q < lp.length - 1; q++) { lp[q] = { x: (lp[q - 1].x + 2 * lp[q].x + lp[q + 1].x) / 4, y: (lp[q - 1].y + 2 * lp[q].y + lp[q + 1].y) / 4, z: (lp[q - 1].z + 2 * lp[q].z + lp[q + 1].z) / 4 }; }
-      if (kk0) for (q = 1; q < lp.length; q++) {                                  // 편 길: 가는 쪽만 펴고 높이는 원래대로(두피 안으로도 안 들어감)
-        var ek = ekf(lp[q]), tg = Math.max(1.012, kk0[q]);
-        if (ek > 1e-6) { var em = tg / ek; lp[q] = { x: lp[q].x * em, y: ECY + (lp[q].y - ECY) * em, z: lp[q].z * em }; }
-      }
-      var la = arcs(lp), r0 = Ld.p[0], laL = la[lp.length - 1], rawL = Ld.a[Ld.p.length - 1], lk = PC.lockSmoothCm > 0 ? laL / Math.max(1e-9, rawL) : 1, tipM = { x: 0, y: 0, z: 0 };
+      for (ps = 0; ps < 2; ps++) for (q = 1; q < lp.length - 1; q++) { lp[q] = { x: (lp[q - 1].x + 2 * lp[q].x + lp[q + 1].x) / 4, y: (lp[q - 1].y + 2 * lp[q].y + lp[q + 1].y) / 4, z: (lp[q - 1].z + 2 * lp[q].z + lp[q + 1].z) / 4 }; }
+      var la = arcs(lp), r0 = Ld.p[0];
       mem.forEach(function (rc) {
         var pp = rc.p, aa = rc.a, out = new Array(pp.length), dx = pp[0].x - r0.x, dy = pp[0].y - r0.y, dz = pp[0].z - r0.z, q2, sx, tp, w;
         out[0] = pp[0];
         for (q2 = 1; q2 < pp.length; q2++) {
-          sx = aa[q2];
-          if (PC.lockSmoothCm > 0) {
-            if (sx <= rawL) atArc(lp, la, sx * lk, o);
-            else { atArc(pp, aa, rawL, tipM); o.x = lp[lp.length - 1].x + (pp[q2].x - tipM.x); o.y = lp[lp.length - 1].y + (pp[q2].y - tipM.y); o.z = lp[lp.length - 1].z + (pp[q2].z - tipM.z); }   // 길잡이보다 긴 가닥: 남은 길은 제 모양대로 이어 감(곧은 막대가 되지 않게)
-          } else atArc(lp, la, sx, o);
+          sx = aa[q2]; atArc(lp, la, sx, o);
           tp = sx >= tapL ? PC.lockTaper : 1 - (1 - PC.lockTaper) * sx / tapL;
           w = PC.lockPull * Math.min(1, sx / rootL);
           out[q2] = { x: pp[q2].x + (o.x + dx * tp - pp[q2].x) * w, y: pp[q2].y + (o.y + dy * tp - pp[q2].y) * w, z: pp[q2].z + (o.z + dz * tp - pp[q2].z) * w };
@@ -278,5 +256,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261008d). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다. 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
