@@ -147,9 +147,10 @@
     natLenMin: 0.25, natLenMax: 4,   // 길이 배수(스타일 길이 ÷ 제 칸 길이)의 한도
     smallFrac: 0.25,     // (i) 몸통 가닥 수가 보통 칸(중앙값)의 이 비율 미만인 무리는 같은 쪽으로 가는 큰 이웃의 방향을 따름 · 0 = 끔
     saveComb: true,      // (h) 스타일 등록 때 빗질·넘기기(53번)를 건 가닥으로 표를 뽑음 — 넘긴 모양이 스타일에 들어감 · false = 빗기 전 모양으로(예전)
+    natUpK: 1.25,        // (2026-10-10a) 제 머리 바탕: 두상(타원) 반지름의 이 배 밖에서는 결이 위로 가도 위로 가려던 만큼 아래로 꺾임(처짐) · 0 = 끔
     natTail: 1.1, natTailFull: 2,    // (g) 늘릴 때: 제 칸보다 긴 가닥도 스타일 칸 길이의 natTail배까지만(배수 natTailFull 이상에서 온전히) · 0 = 안 누름
     nativeWaitMs: 25000, // 다시 기르기를 이만큼 기다려도 안 끝나면 마네킹 방식으로 겁니다
-    guardNeck: true,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
+    guardNeck: false,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
     fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
   }, W.FLOW_SPEC || {});
   var ST = FS.stats = { built: null, shaped: 0, fallback: 0, err: null, saveWarn: null };
@@ -645,11 +646,19 @@
           ux = vx; uy = vy; uz = vz;
         } else { ux = ms[0]; uy = ms[1]; uz = ms[2]; }
       }
+      if (cfg.natUpK > 0 && uy > 0) {                                        // (2026-10-10a) 머리 겉면 밖에서는 위로 안 가고 아래로 꺾임 — 곱슬 표의 헤매는 결이 긴 머리에서 정수리 위로 솟는 막대가 되던 것
+        var kq = Math.sqrt(px * px + py * py + pz * pz);
+        if (kq > cfg.natUpK) { var wu = Math.min(1, (kq - cfg.natUpK) / 0.08); uy *= (1 - 2 * wu); var lu = Math.sqrt(ux * ux + uy * uy + uz * uz); if (lu > 1e-6) { ux /= lu; uy /= lu; uz /= lu; } else { ux = 0; uy = -1; uz = 0; } if (cfg._st && wu > 0) cfg._st.upCut = (cfg._st.upCut || 0) + 1; }
+      }
       px += ux * step; py += uy * step; pz += uz * step; arc += step; put();
     }
     if (T - arc > 1e-3) {                                                    // 스타일이 더 긺 — 스타일의 결을 따라 이어 기름
       var avg = A / Math.max(1, m - 1), nx2 = Math.min(80, Math.max(1, Math.ceil((T - arc) / Math.max(avg, 1e-3)))), ds = (T - arc) / nx2, k;
-      for (k = 0; k < nx2; k++) { sty.dir(arc + ds * 0.5, ms); px += ms[0] * ds; py += ms[1] * ds; pz += ms[2] * ds; arc += ds; put(); }
+      for (k = 0; k < nx2; k++) {
+        sty.dir(arc + ds * 0.5, ms);
+        if (cfg.natUpK > 0 && ms[1] > 0) { var kq2 = Math.sqrt(px * px + py * py + pz * pz); if (kq2 > cfg.natUpK) { var wu2 = Math.min(1, (kq2 - cfg.natUpK) / 0.08), my = ms[1] * (1 - 2 * wu2), lm = Math.sqrt(ms[0] * ms[0] + my * my + ms[2] * ms[2]) || 1; ms[0] /= lm; ms[1] = my / lm; ms[2] /= lm; } }
+        px += ms[0] * ds; py += ms[1] * ds; pz += ms[2] * ds; arc += ds; put();
+      }
     }
     return out.length >= 2 ? out : null;
   }
@@ -828,7 +837,7 @@
       if (state.fade && sp.fade) Object.assign(state.fade, sp.fade);
       try { if (typeof BRAID !== 'undefined') BRAID.on = false; } catch (e) {}
     } catch (e) { nat.err = '값 넣기 실패: ' + (e && e.message || e); console.warn(TAG + ' ' + nat.err, e); return false; }
-    nat.id = id; nat.base = G.base; nat.undo = undo; nat.shaped = 0; nat.kept = 0; nat.tailCut = 0; FS._st = nat; nat.err = null; nat.applied++; nat.at = new Date().toTimeString().slice(0, 8);
+    nat.id = id; nat.base = G.base; nat.undo = undo; nat.shaped = 0; nat.kept = 0; nat.tailCut = 0; nat.upCut = 0; FS._st = nat; nat.err = null; nat.applied++; nat.at = new Date().toTimeString().slice(0, 8);
     refreshActive();
     redrawAll(sp.name || '스타일');
     needNatLine = true;
@@ -1080,7 +1089,7 @@
     var sp = null; try { sp = natSpec(); } catch (e) {}
     if (!sp) return TAG + ' 제 머리 바탕 — ' + (nat.pending ? '거는 중(다시 기르기를 기다림)' : (FS.native ? '걸린 스타일 없음' : '꺼짐(FLOW_SPEC.native=false)')) +
       (isCurlyPhoto() ? ' · 이 손님은 컬 ' + FS.nativeCurl + ' 이상이라 원본을 다시 기른 머리로 보여 줍니다' : '') + (nat.fellBack ? ' · 마네킹 방식으로 떨어진 횟수 ' + nat.fellBack : '') + (nat.err ? ' · ⚠ ' + nat.err : '');
-    return TAG + ' 제 머리 바탕으로 걸림 — "' + (sp.name || nat.id) + '"(' + nat.at + ') · 마네킹 안 켬 · 큰 흐름을 스타일 표로 바꾼 가닥 ' + nat.shaped + '개' + (nat.kept ? ' · 표가 없어 그대로 둔 가닥 ' + nat.kept : '') + (nat.tailCut ? ' · 혼자 길어서 스타일 길이로 누른 가닥 ' + nat.tailCut + '(FLOW_SPEC.natTail)' : '') +
+    return TAG + ' 제 머리 바탕으로 걸림 — "' + (sp.name || nat.id) + '"(' + nat.at + ') · 마네킹 안 켬 · 큰 흐름을 스타일 표로 바꾼 가닥 ' + nat.shaped + '개' + (nat.upCut ? ' · 머리 겉면 밖에서 위로 솟으려다 아래로 꺾인 마디 ' + nat.upCut + '(FLOW_SPEC.natUpK)' : '') + (nat.kept ? ' · 표가 없어 그대로 둔 가닥 ' + nat.kept : '') + (nat.tailCut ? ' · 혼자 길어서 스타일 길이로 누른 가닥 ' + nat.tailCut + '(FLOW_SPEC.natTail)' : '') +
       ' · 가닥의 잔 차이는 이 손님 것 그대로(' + FS.natResMax + '°까지) · 길이는 스타일 ÷ 제 칸 배수' + (nat.err ? ' · ⚠ ' + nat.err : '') + ' — 끄기 FLOW_SPEC.native=false 후 스타일 다시 걸기';
   };
   FS.applyLine = function () {

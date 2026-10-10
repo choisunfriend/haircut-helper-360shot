@@ -280,3 +280,12 @@
   if (typeof ppl === 'function') W.perfPanelLines = function () { var L = ppl.apply(this, arguments) || []; try { SO.lines().forEach(function (x) { L.push(x); }); } catch (e) {} return L; };
   console.log(TAG + ' 설치 — 사진 결을 ' + SO.orientStepPx + 'px마다 저장(예전: 세로줄마다 12곳) · 머리 영역을 이 손님 머리색·결 무늬로 다시 찾음. 새로 분석하는 사진부터 적용 · 끄기 SEG_ORIENT.dense=false / .regrow=false');
 })();
+
+/* 2026-10-10d — 얼굴 막음 끄기. 사용자: "최소화하는거는 이제 점점 없애라는 얘기야.
+ * 튀어나오는 가닥들 어차피 3D결과보기에 갔다가 나오면 잘리긴 하니까."
+ * 13b 의 얼굴 타원 막음(faceAt ≥ faceThr 이면 가닥을 끊음)을 끈다. 42 neck, 59 guardNeck 도 꺼 둠.
+ * 되돌리기: HAIR_OCC3D.faceVeto = true */
+(function(){
+  try { if (window.HAIR_OCC3D || typeof HAIR_OCC3D !== 'undefined') { HAIR_OCC3D.faceVeto = false; } } catch (e) {}
+  console.log('[64] 얼굴·목 막음 꺼짐 (v20261010d · 되돌리기 HAIR_OCC3D.faceVeto=true, REGROW.neck=true)');
+})();
