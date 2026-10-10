@@ -294,8 +294,58 @@
   };
 
   var innerCurl = W.curlStrand3D;
+  /* ④ (2026-10-10t) 원본 = 맨 마네킹 + 잰 컬 — 사용자: "이제는 값을 좀 더 정밀하게 받으니까 마네킨 모드에 다시 올려보자"
+   *  예전에 컬 손님을 마네킹에 올렸을 때 부피가 죽은 원인(컬 엔진으로 직접 잼 · 30cm 직모 · 컬 82):
+   *    엔진 기본값은 끝에서 20cm만 감음(windCm 20) → 뿌리에서 17cm는 곧은 채 · 반경도 가닥마다 흩어짐.
+   *  지금: 원본(마네킹+스펙)을 볼 때만 · 스펙의 컬이 lookMinCurl 이상이고 잰 반경이 있으면
+   *    · 뿌리부터 끝까지 감음(windCm 99 · rootLeaveCm 1) · 뭉침 모양(look)
+   *    · 웨이브 = 엔진이 잰 반경을 내는 값, 한 바퀴 간격(pitchThick) = 잰 간격을 내는 값 — 엔진을 직선 가닥에 돌려 이분법으로 찾음(값마다 한 번)
+   *    · 감으면 줄어드는 만큼 미리 늘림(엔진으로 잰 남는 비율) → 겉 길이 = 스펙 길이 */
+  PC.mq = true; PC.mqWind = 999; PC.mqRootLeave = 1; PC.mqStretch = true;
+  var mqMemo = { key: '', wave: null, pt: null, remain: 1, r: null, P: null }, mqS = PC.mqStats = { calls: 0, solved: '' };
+  function origSpec() {
+    try { var OM = W.ORIG_MQ; if (!OM || !OM.on || !mqOn() || typeof OM.isOriginal !== 'function' || !OM.isOriginal()) return null; var sp = OM.spec, pm = sp && sp.perm; return (pm && pm.curl >= PC.lookMinCurl && pm.rCm > 0) ? pm : null; } catch (e) { return null; }
+  }
+  function engineOn(C, w, pt) {                // 직선 30cm 가닥에 엔진을 돌려 반경·간격·남는 비율을 잼
+    var CB = CURL_BUNDLE, cm = CB.cmPerUnit || 19.33, L = 30 / cm, n = 300, g = [], i, k, sv = {}, o = {}, p;
+    for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; if (pt != null) o.pitchThick = pt;
+    for (i = 0; i <= n; i++) g.push({ x: 0, y: -i * L / n, z: 0.4 });
+    for (k in o) { sv[k] = CB[k]; CB[k] = o[k]; }
+    try { p = innerCurl(g, C, w / 100, 0); } finally { for (k in sv) CB[k] = sv[k]; }
+    var m = p.length, R = [], H = Math.max(5, Math.round(m / 40)), zc = [];
+    for (i = H; i < m - H; i++) { var ax = 0, az = 0, j; for (j = i - H; j <= i + H; j++) { ax += p[j].x; az += p[j].z; } ax /= 2 * H + 1; az /= 2 * H + 1; R.push(Math.hypot(p[i].x - ax, p[i].z - az) * cm); }
+    R.sort(function (x, y) { return x - y; });
+    for (i = 1; i < m; i++) if (p[i].x * p[i - 1].x < 0) zc.push(p[i].y);
+    return { r: R.length ? R[R.length >> 1] : 0, P: zc.length > 3 ? (zc[1] - zc[zc.length - 1]) / ((zc.length - 2) / 2) * cm : NaN, remain: (p[0].y - p[m - 1].y) * cm / 30 };
+  }
+  function mqSolve(C, rT, PT) {
+    var key = [C, rT.toFixed(2), PT ? PT.toFixed(2) : '-', PC.mqWind, PC.mqRootLeave, JSON.stringify(PC.look)].join('|');
+    if (mqMemo.key === key) return mqMemo;
+    var lo = 0, hi = 100, i, e, w = 50;
+    for (i = 0; i < 9; i++) { w = (lo + hi) / 2; e = engineOn(C, w, null); if (e.r < rT) lo = w; else hi = w; }
+    w = Math.round((lo + hi) / 2);
+    var pt = PC.look.pitchThick || 1.4;
+    if (PT > 0) { var a = 0.2, b = 6; for (i = 0; i < 9; i++) { pt = Math.sqrt(a * b); e = engineOn(C, w, pt); if (!(e.P > 0) || e.P < PT) a = pt; else b = pt; } pt = Math.sqrt(a * b); }
+    e = engineOn(C, w, pt);
+    mqMemo = { key: key, wave: w, pt: pt, remain: Math.max(0.12, Math.min(1, e.remain)), r: e.r, P: e.P };
+    mqS.solved = '컬 ' + C + ' · 잰 반경 ' + rT.toFixed(2) + 'cm' + (PT ? ' · 잰 간격 ' + PT.toFixed(1) + 'cm' : '') + ' → 웨이브 ' + w + ' · 간격 값 ' + pt.toFixed(2) + ' (엔진: 반경 ' + e.r.toFixed(2) + ' · 간격 ' + (e.P > 0 ? e.P.toFixed(1) : '-') + 'cm · 남는 길이 ' + e.remain.toFixed(2) + ')';
+    try { console.log(TAG + ' ④ 마네킹 위 잰 컬 — ' + mqS.solved); } catch (e2) {}
+    return mqMemo;
+  }
+  function mqCurl(g, C) {
+    var pm = origSpec(); if (!pm || !(C > 0) || typeof CURL_BUNDLE === 'undefined') return null;
+    var M = mqSolve(C, pm.rCm * PC.radiusK, pm.pitchCm > 0 ? pm.pitchCm : null);
+    var CB = CURL_BUNDLE, o = {}, sv = {}, k, args = Array.prototype.slice.call(arguments);
+    for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
+    args[2] = M.wave / 100;
+    if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(g, 1 / M.remain); } catch (e) {} }
+    for (k in o) { sv[k] = CB[k]; CB[k] = o[k]; }
+    mqS.calls++;
+    try { return innerCurl.apply(this, args); } finally { for (k in sv) CB[k] = sv[k]; }
+  }
   if (typeof innerCurl === 'function') {
     W.curlStrand3D = function () {
+      if (PC.mq && !lookActive()) { var mr = mqCurl.apply(this, arguments); if (mr) return mr; }
       if (!lookActive()) return innerCurl.apply(this, arguments);
       var CB = CURL_BUNDLE, L = PC.look, sv = {}, k;
       if (PC.clumpSize && curS && lockMemo.rOf && lockMemo.rOf.has(curS) && arguments.length >= 3 && S.rCm > 0) {   // 조각마다 잰 크기로 웨이브(컬 굵기)
@@ -313,7 +363,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
@@ -341,5 +391,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010b · 사진 타래 조각으로 묶기 · 조각마다 크기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010c · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();

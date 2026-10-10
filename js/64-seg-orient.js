@@ -287,5 +287,25 @@
  * 되돌리기: HAIR_OCC3D.faceVeto = true */
 (function(){
   try { if (window.HAIR_OCC3D || typeof HAIR_OCC3D !== 'undefined') { HAIR_OCC3D.faceVeto = false; } } catch (e) {}
-  console.log('[64] 얼굴·목 막음 꺼짐 (v20261010d · 되돌리기 HAIR_OCC3D.faceVeto=true, REGROW.neck=true)');
+  console.log('[64] 얼굴·목 막음 꺼짐 (v20261010e · 되돌리기 HAIR_OCC3D.faceVeto=true, REGROW.neck=true)');
+})();
+
+/* 2026-10-10e — 마네킹 ON = 언제나 맨 마네킹(컬 0 · 쫙 편 머리).
+ * 사용자: "뽀글이라도 마네킨 모드를 켰을 때는 완전히 쫙 펴져야지."
+ * 원인: 원본 머리를 "마네킹+스펙"으로 못 올리고 다시 기른 가닥으로 보여 주던 손님(곱슬 여자분 등)은
+ *   마네킹을 켤 때 58번의 초기화(bare)를 안 타고 17·42번 길로만 켜져서, 42번이 넣어 둔 잰 컬(82)이 섹션에 그대로 남음 → 마네킹에 웨이브. */
+(function(){
+  var W = window, inner = W.toggleMannequin;
+  if (typeof inner !== 'function') return;
+  function mq() { try { return !!(typeof MANNEQUIN !== 'undefined' && MANNEQUIN.on); } catch (e) { return false; } }
+  W.toggleMannequin = function () {
+    var was = mq(), r = inner.apply(this, arguments);
+    try {
+      if (!was && mq() && W.ORIG_MQ && typeof W.ORIG_MQ.bare === 'function') {
+        var left = 0; try { Object.keys(state.sections || {}).forEach(function (k) { if ((state.sections[k].curl || 0) > 0) left++; }); } catch (e) {}
+        if (left || state._globalCurl) { W.ORIG_MQ.bare(); console.log('[64] 마네킹 켬 — 남아 있던 컬 지움(섹션 ' + left + '곳) → 맨 마네킹'); }
+      }
+    } catch (e) { console.warn('[64] 맨 마네킹 맞추기 실패', e); }
+    return r;
+  };
 })();
