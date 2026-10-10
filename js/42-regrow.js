@@ -167,6 +167,7 @@
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
     curlRadius: false,          // (2026-10-06r) 끔 — 켜면 컬이 죽음(웨이브 100 + 로드 ×1.29 = 곧은 막대). q에서 다시 켠 것은 잘못 읽은 것 — 머리말 v8 참고
     clumps: true, clumpWin: 17, clumpLift: 1.5, clumpMinPx: 25,   // (2026-10-10m) 곱슬 사진에서 타래 조각 찾기(61번이 3D 가닥을 조각대로 묶음)
+    waveFromHelix: true, waveFromHelixBelow: 30, waveHelixPitchLo: 3, waveHelixPitchHi: 15, waveHelixRLo: 0.8, waveCurlLo: 40, waveCurlHi: 65,   // (2026-10-10p) 굵은 웨이브: 컬이 30 미만으로 잡혀도 나선 측정이 한 바퀴 3~15cm·반경 0.8cm 이상을 잡으면 컬 40~65(반경÷간격에 비례). 사용자: 이 정도(한 바퀴 7~8cm)면 "강한 펌은 아니지만 약한 펌도 아님" → 60대 · 더 굵은 미국식 웨이브(간격이 더 김)는 40~50대
     fadeOn: true,       // (2026-10-10l) 페이드를 잰 손님은 페이드 토글을 켜서 시작
     curlHelix: true,    // (2026-10-10m) 다시 켬(사용자: 타래 구현까지 한 다음에 판단) · 예전 메모: 실제 곱슬 사진(타래가 여러 방향으로 감김)에서 사진마다 0.6~1.1cm로 들쭉날쭉·정면은 못 잼 → 사진 전체 한 번이 아니라 부분마다 재는 방식으로 다시 만들 때까지 예전 어림식
     curlHelix_was: true, helixPeak: 0.3, helixBetaLo: 25, helixBetaHi: 78,   // (2026-10-10k) 나선 측정으로 컬 반경·한 바퀴 간격을 잼(쓸 조건: 반복 세기 · 가닥 기울기 범위) · false = 예전 어림식
@@ -1408,6 +1409,17 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
         rs.sort(function (x, y) { return x - y; });
         out.rCm = rs.length % 2 ? rs[(rs.length - 1) / 2] : (rs[rs.length / 2 - 1] + rs[rs.length / 2]) / 2;
       } else out.rNote = '카메라 배율이 없어 cm로 못 바꿈 — 웨이브 50';
+      // (2026-10-10o) 굵은 웨이브(물결 펌) — 결 꺾임(°/px)이 낮아 컬 0으로 잡히지만, 나선 측정이 큰 반복(한 바퀴 3~15cm)을 잡으면 웨이브로 봄
+      try {
+        var hv = out.rViews.filter(function (v) { return v.how === 'helix' && v.pitchCm >= G.waveHelixPitchLo && v.pitchCm <= G.waveHelixPitchHi && v.cm >= G.waveHelixRLo; });
+        if (G.waveFromHelix && out.value < G.waveFromHelixBelow && hv.length >= 1) {
+          var ps = hv.map(function (v) { return v.pitchCm; }).sort(function (x, y) { return x - y; }), rr = hv.map(function (v) { return v.cm; }).sort(function (x, y) { return x - y; });
+          var pm = ps[ps.length >> 1], rm = rr[rr.length >> 1];
+          out.waveHelix = { pitchCm: pm, rCm: rm, views: hv.length, was: out.value };
+          out.value = out.raw = Math.round(Math.max(G.waveCurlLo, Math.min(G.waveCurlHi, G.waveCurlLo + (G.waveCurlHi - G.waveCurlLo) * Math.min(1, rm / Math.max(0.5, pm) * 2))));
+          out.rCm = rm; out.pitchCm = pm;
+        }
+      } catch (e) {}
       if (G.curlRadius && out.rCm > 0 && out.value > 0) {
         var cm = modelCmPerUnit() || 16.4, FX = (typeof CURL3D_FIX !== 'undefined') ? CURL3D_FIX : { ampGamma: 1, radiusGamma: 0.5 };
         var amp = Math.pow(out.value / 100, FX.ampGamma || 1), need = (out.rCm / cm) / Math.pow(amp, FX.radiusGamma || 1);   // 필요한 로드 반경(모델 단위)
@@ -1505,7 +1517,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     L.push('  컬 ' + pc.value + (pc.deg == null ? ' — 결 꺾임을 잰 뷰가 없어 0' :
       ' ← 결 꺾임 ' + pc.deg.toFixed(2) + '°/px(뷰 중앙값) · ' + pc.views.map(function (v) { return v.a + ' ' + v.v.toFixed(2) + (v.ok ? '' : '(표본 ' + v.n + ' — 안 씀)'); }).join(' · ') +
       ' · 환산 ' + G.curlLo + '~' + G.curlHi + '°/px → 0~' + G.curlMax + ' (어림값 — 직모 사진에서 컬이 잡히면 curlLo를 올릴 것)' + (G.curl ? '' : ' · 꺼짐(REGROW.curl=false) — 켜면 ' + pc.raw)) +
-      (pc.value > 0 ? ' · 편 길이 = 보이는 길이 × ' + (1 / curlRemain(pc.value)).toFixed(2) : ''));
+      (pc.value > 0 ? ' · 편 길이 = 보이는 길이 × ' + (1 / curlRemain(pc.value)).toFixed(2) : '') + (pc.waveHelix ? ' · 굵은 웨이브로 봄(나선 측정 ' + pc.waveHelix.views + '장 · 한 바퀴 ' + pc.waveHelix.pitchCm.toFixed(1) + 'cm · 반경 ' + pc.waveHelix.rCm.toFixed(1) + 'cm · 예전 컬 ' + pc.waveHelix.was + ')' : ''));
     if (pc.rViews && (pc.rViews.length || pc.rNote)) L.push('  컬 굵기 ' + (pc.rCm > 0 ? '반경 ' + pc.rCm.toFixed(1) + 'cm(뷰 중앙값) → ' + (G.curlRadius ? '웨이브 ' + pc.wave +
       (pc.rodScale > 1 ? ' + 로드 ×' + pc.rodScale.toFixed(2) + '(다시 기른 가닥에만)' : '') + (pc.rodCm ? ' · 로드 반경 ' + pc.rodCm.toFixed(1) + 'cm' : '') : '꺼짐(REGROW.curlRadius=false) — 웨이브 50') : (pc.rNote || '못 잼')) +
       (pc.rViews.length ? ' · ' + pc.rViews.map(function (v) { return v.a + ' ' + (v.flat ? '직선' : v.noScale ? 'dHalf ' + v.dHalf.toFixed(1) + 'px(배율 없음)' : v.cm.toFixed(1) + 'cm(' + (v.how === 'helix' ? '나선 측정 · 한 바퀴 간격 ' + v.pitchCm.toFixed(1) + 'cm · 가닥 기울기 ' + Math.round(v.beta) + '° · 반복 세기 ' + v.hxPeak.toFixed(2) + ' · ' : '') + (v.how === 'amp' ? '결 선 흔들림 폭으로 잼 · 흔들리는 선 ' + Math.round((v.wavy || 0) * 100) + '%' + (v.lamCm ? ' · 한 바퀴 길이 ' + v.lamCm.toFixed(1) + 'cm' : '') + ' · ' : '') + 'dHalf ' + v.dHalf.toFixed(1) + 'px' + (v.floor ? ' — 하한, 이보다 잔 컬일 수 있음' : '') + ')'); }).join(' · ') : '') +
@@ -1597,5 +1609,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010n — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010p — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
