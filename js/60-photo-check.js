@@ -562,7 +562,7 @@
         }
         var MT = new Float32Array(nm), MP = new Uint8Array(nm); for (j3 = 0; j3 < nm; j3++) { g3 = ms[j3] && ms[j3].rg; if (!g3) continue; MT[j3] = typeof g3.t === 'number' ? g3.t : -1; MP[j3] = g3.flip | 0; }
         add('rg.mi', MI); add('rg.mf', MF); add('rg.t', MT); add('rg.flip', MP);
-        H.rgMeta = { mi: 'stop(1영역밖 2길이상한 3끝높이 4걸음상한),free,est0,traced', mf: 'sOn,sFree,cap,stp,nEst,nBack,nNeck,den', t: '뿌리 자리 두께(모델 단위)', flip: '0 안 뒤집음 1 뒤집음 2 얇아서 안 뒤집음', traced: tr.length,
+        H.rgMeta = { mi: 'stop(1영역밖 2길이상한 3끝높이 4걸음상한),free,est0,traced', mf: 'sOn,sFree,cap,stp,nEst,nBack,nNeck,den', t: '뿌리 자리 두께(모델 단위)', flip: '0 안 뒤집음 1 뒤집음 2 얇아서 안 뒤집음(아래 그대로) 3 얇아서 옆으로 눕힘', traced: tr.length,
           trace: '걸음마다 11값: 단계(0두피위 1두피밖 2곧게내림),결못읽음,쓴사진수,주로쓴사진(0..),결또렷함%,사진끼리벌어진각°,막음(1앞쏠림 2목),머리영역표,x,y,z' };
         if (tr.length) { var TA = new Float32Array(trLen), o3 = 0; tr.forEach(function (a) { TA.set(a, o3); o3 += a.length; }); add('rg.trace', TA); add('rg.traceIdx', new Uint32Array(trIdx)); }
         try { var cfgG = {}; Object.keys(G).forEach(function (k) { var v = G[k]; if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') cfgG[k] = v; }); H.regrowCfg = cfgG; } catch (e) {}
