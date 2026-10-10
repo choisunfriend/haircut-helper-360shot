@@ -166,6 +166,7 @@
     curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
     curlRadius: false,          // (2026-10-06r) 끔 — 켜면 컬이 죽음(웨이브 100 + 로드 ×1.29 = 곧은 막대). q에서 다시 켠 것은 잘못 읽은 것 — 머리말 v8 참고
+    curlHelix: true, helixPeak: 0.3, helixBetaLo: 25, helixBetaHi: 78,   // (2026-10-10k) 나선 측정으로 컬 반경·한 바퀴 간격을 잼(쓸 조건: 반복 세기 · 가닥 기울기 범위) · false = 예전 어림식
     curlAmp: false, curlAmpK: 1.15, curlAmpWavy: 0.25,   // (2026-10-10j) 끔 — 실제 곱슬 사진에서 0.4cm로 작게 잼(큰 컬은 선이 타래 경계에서 끊겨 빠지고 잔물결만 남음) → 뽀글이. 고칠 때까지 예전 어림식   // (2026-10-10h) 컬 반경을 결 선의 흔들림 폭으로 직접 잼(합성 컬 진폭 3~25px에서 실제의 74~96% → ×1.15) · 흔들리는 선이 이 비율 이상일 때만 · false = 예전 어림식
     curlRk: 5, curlR0: 3.3,     // 컬 반경(px) = curlRk × (dHalf − curlR0)  (⚠ 합성 타래 무늬로 맞춘 어림)
     curlRminPx: 5,              // 이보다 작게는 구분 못 함(결 방향장의 창 크기)
@@ -1239,6 +1240,45 @@
     return { ampPx: med, lamPx: lam, n: amps.length, tried: tried, wavy: waved / tried };
   }
   G.curlAmpFn = curlAmp;
+  /* (2026-10-10k) 나선 측정 — 사진 속 곱슬은 가닥이 아니라 타래(나선)의 앞면만 보임 → 결 선은 반 바퀴마다 끊김.
+     대신: 머리 영역 밝기의 자기상관(FFT)에서 축 방향 반복 = 한 바퀴 간격 P · 가닥이 축에서 기운 각의 봉우리 β(나선 앞면 가운데)
+     → 나선 중심 반경 Rc = P·tanβ/2π · 타래 지름 ≈ 2·Rc·1.8. 실제 나선 타래를 비춰 그린 무늬(지름 12~40px · 간격 16~60px)에서 지름 오차 2~14% · 간격은 정확.
+     직모(가닥이 축과 거의 직각으로 나옴 β>78°)·반복이 약하면 안 씀. */
+// 나선 측정: 머리 영역 밝기의 자기상관(FFT)에서 한 바퀴 간격 P(축 방향 반복)와 가닥 기울기 β → 지름 D = P·tanβ/π
+function hxFft(re,im,n,inv){for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+ for(let len=2;len<=n;len<<=1){const a=2*Math.PI/len*(inv?1:-1),wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let j=0;j<len/2;j++){const ur=re[i+j],ui=im[i+j],vr=re[i+j+len/2]*cr-im[i+j+len/2]*ci,vi=re[i+j+len/2]*ci+im[i+j+len/2]*cr;re[i+j]=ur+vr;im[i+j]=ui+vi;re[i+j+len/2]=ur-vr;im[i+j+len/2]=ui-vi;const nr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nr;}}}
+ if(inv)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;}}
+function hxFft2(re,im,n,inv){const rr=new Float64Array(n),ri=new Float64Array(n);for(let y=0;y<n;y++){for(let x=0;x<n;x++){rr[x]=re[y*n+x];ri[x]=im[y*n+x];}hxFft(rr,ri,n,inv);for(let x=0;x<n;x++){re[y*n+x]=rr[x];im[y*n+x]=ri[x];}}
+ for(let x=0;x<n;x++){for(let y=0;y<n;y++){rr[y]=re[y*n+x];ri[y]=im[y*n+x];}hxFft(rr,ri,n,inv);for(let y=0;y<n;y++){re[y*n+x]=rr[y];im[y*n+x]=ri[y];}}}
+function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||256;
+ // 1) 밝기 · 머리 영역 안만 · 저주파 뺌
+ const L=new Float32Array(W*H);for(let i=0;i<W*H;i++)L[i]=0.299*rgba[i*4]+0.587*rgba[i*4+1]+0.114*rgba[i*4+2];
+ // 머리 영역의 중심에서 n×n(사진이 작으면 줄임)
+ let sx=0,sy=0,c=0;for(let i=0;i<W*H;i++)if(mask[i]){sx+=i%W;sy+=(i/W)|0;c++;}if(c<2000)return null;const cx=Math.round(sx/c),cy=Math.round(sy/c);
+ const re=new Float64Array(n*n),im=new Float64Array(n*n),wm=new Float64Array(n*n);let mean=0,mc=0;
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){const X=cx-n/2+x,Y=cy-n/2+y;if(X<0||Y<0||X>=W||Y>=H)continue;const i=Y*W+X;if(!mask[i])continue;mean+=L[i];mc++;}mean/=Math.max(1,mc);
+ for(let y=0;y<n;y++)for(let x=0;x<n;x++){const X=cx-n/2+x,Y=cy-n/2+y;if(X<0||Y<0||X>=W||Y>=H)continue;const i=Y*W+X;if(!mask[i])continue;const hw=(0.5-0.5*Math.cos(2*Math.PI*x/n))*(0.5-0.5*Math.cos(2*Math.PI*y/n));re[y*n+x]=(L[i]-mean)*hw;wm[y*n+x]=hw;}
+ // 2) 자기상관 = |FFT|² 역변환 (영역 모양 효과는 창 자기상관으로 나눔)
+ hxFft2(re,im,n,false);for(let i=0;i<n*n;i++){re[i]=re[i]*re[i]+im[i]*im[i];im[i]=0;}hxFft2(re,im,n,true);
+ const wr=Float64Array.from(wm),wi=new Float64Array(n*n);hxFft2(wr,wi,n,false);for(let i=0;i<n*n;i++){wr[i]=wr[i]*wr[i]+wi[i]*wi[i];wi[i]=0;}hxFft2(wr,wi,n,true);
+ const A=(dx,dy)=>{const x=(dx+n)%n,y=(dy+n)%n,k=y*n+x;return wr[k]>1e-6*wr[0]?re[k]/wr[k]:0;};const A0=A(0,0);
+ // 3) 가는 결 방향(β 재기용) — 사진 결의 중앙값(두 배 각)
+ let ca=0,sa=0;for(let i=0;i<W*H;i+=3)if(mask[i]&&coh[i]>0.3){ca+=coh[i]*Math.cos(2*angle[i]);sa+=coh[i]*Math.sin(2*angle[i]);}const fine=0.5*Math.atan2(sa,ca);
+ // 4) 중심을 뺀 가장 센 자기상관 봉우리 = 한 바퀴 옮김(P) — 반경 rmin..rmax에서
+ const rmin=opt.rmin||6,rmax=opt.rmax||Math.min(110,n/2-4);let best=-1e18,bx=0,by=0;
+ for(let dy=0;dy<=rmax;dy++)for(let dx=-rmax;dx<=rmax;dx++){const r=Math.hypot(dx,dy);if(r<rmin||r>rmax)continue;if(dy===0&&dx<0)continue;
+  const v=A(dx,dy);if(v<=best)continue;// 봉우리인지(이웃보다 큼)
+  let pk=true;for(let ey=-1;ey<=1&&pk;ey++)for(let ex=-1;ex<=1;ex++){if(!ex&&!ey)continue;if(A(dx+ex,dy+ey)>v){pk=false;break;}}if(pk){best=v;bx=dx;by=dy;}}
+ const P=Math.hypot(bx,by),axis=Math.atan2(by,bx);
+ // 가닥이 축에서 기운 각의 분포(또렷함 무게) — 가장 많은 각(봉우리) = 나선 앞면 가운데의 기울기
+ const hb=new Float64Array(91);for(let i=0;i<W*H;i+=2){if(!mask[i]||!(coh[i]>0.3))continue;let d=Math.abs(((angle[i]-axis)%Math.PI+Math.PI)%Math.PI);if(d>Math.PI/2)d=Math.PI-d;hb[Math.min(90,Math.round(d*57.3))]+=coh[i];}
+ const sm=new Float64Array(91);for(let k=0;k<=90;k++){let s2=0,w2=0;for(let j=-4;j<=4;j++){const q=k+j;if(q<0||q>90)continue;const ww=5-Math.abs(j);s2+=hb[q]*ww;w2+=ww;}sm[k]=s2/w2;}
+ let bk=12;for(let k=12;k<=88;k++)if(sm[k]>sm[bk])bk=k;const beta=bk/57.3;
+ const Rc=P*Math.tan(beta)/(2*Math.PI),D=2*Rc*(opt.tubeK||1.8);
+ return {P,D,Rc,beta:beta*57.3,axis:axis*57.3,fine:fine*57.3,peak:best/A0,bx,by};}
+
+
+  G.helixMeasureFn = helixMeasure;
   (function () {
     var pend = null;
     var oEx = W.extractHairMask;
@@ -1247,14 +1287,16 @@
     if (typeof oF === 'function') W.computeHairOrientationField = function (px, mask, Wd, Hd) {
       pend = null;
       var f = oF.apply(this, arguments);
-      try { if (f && f.angle && f.coherence) { var cs = curvStats(f.angle, f.coherence, mask, Wd, Hd); if (cs) { pend = { w: Wd, h: Hd, cs: cs }; if (G.curlAmp) { try { pend.amp = curlAmp(f.angle, f.coherence, mask, Wd, Hd); } catch (e2) {} } } } } catch (e) { pend = null; }
+      try { if (f && f.angle && f.coherence) { var cs = curvStats(f.angle, f.coherence, mask, Wd, Hd); if (cs) { pend = { w: Wd, h: Hd, cs: cs }; if (G.curlAmp) { try { pend.amp = curlAmp(f.angle, f.coherence, mask, Wd, Hd); } catch (e2) {} }
+            if (G.curlHelix && px && px.length === Wd * Hd * 4) { try { pend.helix = helixMeasure(px, mask, Wd, Hd, f.angle, f.coherence, { n: Math.min(Wd, Hd) >= 300 ? 256 : 128 }); } catch (e3) {} } } } } catch (e) { pend = null; }
       return f;
     };
     var oM = W.measureViewHairIdentity;
     if (typeof oM === 'function') W.measureViewHairIdentity = function (a) {
       var id = oM.apply(this, arguments);
       try {
-        if (id && pend && a && pend.w === a.w && pend.h === a.h) { id.curlDHalf = pend.cs.dHalf; id.curlFlat = pend.cs.flat; id.curlC1 = pend.cs.c1; id.curlRn = pend.cs.n; if (pend.amp) { id.curlAmpPx = pend.amp.ampPx; id.curlLamPx = pend.amp.lamPx; id.curlWavy = pend.amp.wavy; id.curlAmpN = pend.amp.n; } }
+        if (id && pend && a && pend.w === a.w && pend.h === a.h) { id.curlDHalf = pend.cs.dHalf; id.curlFlat = pend.cs.flat; id.curlC1 = pend.cs.c1; id.curlRn = pend.cs.n; if (pend.helix) { id.curlHelix = pend.helix; }
+        if (pend.amp) { id.curlAmpPx = pend.amp.ampPx; id.curlLamPx = pend.amp.lamPx; id.curlWavy = pend.amp.wavy; id.curlAmpN = pend.amp.n; } }
       } catch (e) {}
       pend = null;
       return id;
@@ -1298,9 +1340,11 @@
         var cpp = cmPerMaskPx(a); if (!(cpp > 0)) { out.rViews.push({ a: a, dHalf: id.curlDHalf, noScale: true }); return; }
         var rpx = G.curlRk * (id.curlDHalf - G.curlR0), floor = !(rpx > G.curlRminPx), how = 'dHalf';
         // (2026-10-10h) 사진 결을 따라 그은 선의 흔들림 폭(진폭)으로 직접 잰 반경 — 흔들리는 선이 충분하면 이것을 씀
-        if (G.curlAmp && id.curlAmpPx > 0 && id.curlWavy >= G.curlAmpWavy && id.curlAmpN >= 60) { rpx = id.curlAmpPx * G.curlAmpK; floor = false; how = 'amp'; }
+        var hx = id.curlHelix, hxOk = G.curlHelix && hx && hx.peak >= G.helixPeak && hx.beta >= G.helixBetaLo && hx.beta <= G.helixBetaHi && hx.P >= 6 && hx.D > 2;
+        if (hxOk) { rpx = hx.D / 2; floor = false; how = 'helix'; }
+        else if (G.curlAmp && id.curlAmpPx > 0 && id.curlWavy >= G.curlAmpWavy && id.curlAmpN >= 60) { rpx = id.curlAmpPx * G.curlAmpK; floor = false; how = 'amp'; }
         else if (floor) rpx = G.curlRminPx;
-        out.rViews.push({ a: a, dHalf: id.curlDHalf, rpx: rpx, cm: rpx * cpp, floor: floor, how: how, wavy: id.curlWavy, lamCm: id.curlLamPx ? id.curlLamPx * cpp : null });
+        out.rViews.push({ a: a, dHalf: id.curlDHalf, rpx: rpx, cm: rpx * cpp, floor: floor, how: how, pitchCm: hxOk ? hx.P * cpp : null, beta: hxOk ? hx.beta : null, hxPeak: hx ? hx.peak : null, wavy: id.curlWavy, lamCm: id.curlLamPx ? id.curlLamPx * cpp : null });
         rs.push(rpx * cpp);
       });
       if (!seen) out.rNote = '굵기를 잰 뷰가 없음(사진을 다시 분석하면 잽니다) — 웨이브 50';
@@ -1409,7 +1453,7 @@
       (pc.value > 0 ? ' · 편 길이 = 보이는 길이 × ' + (1 / curlRemain(pc.value)).toFixed(2) : ''));
     if (pc.rViews && (pc.rViews.length || pc.rNote)) L.push('  컬 굵기 ' + (pc.rCm > 0 ? '반경 ' + pc.rCm.toFixed(1) + 'cm(뷰 중앙값) → ' + (G.curlRadius ? '웨이브 ' + pc.wave +
       (pc.rodScale > 1 ? ' + 로드 ×' + pc.rodScale.toFixed(2) + '(다시 기른 가닥에만)' : '') + (pc.rodCm ? ' · 로드 반경 ' + pc.rodCm.toFixed(1) + 'cm' : '') : '꺼짐(REGROW.curlRadius=false) — 웨이브 50') : (pc.rNote || '못 잼')) +
-      (pc.rViews.length ? ' · ' + pc.rViews.map(function (v) { return v.a + ' ' + (v.flat ? '직선' : v.noScale ? 'dHalf ' + v.dHalf.toFixed(1) + 'px(배율 없음)' : v.cm.toFixed(1) + 'cm(' + (v.how === 'amp' ? '결 선 흔들림 폭으로 잼 · 흔들리는 선 ' + Math.round((v.wavy || 0) * 100) + '%' + (v.lamCm ? ' · 한 바퀴 길이 ' + v.lamCm.toFixed(1) + 'cm' : '') + ' · ' : '') + 'dHalf ' + v.dHalf.toFixed(1) + 'px' + (v.floor ? ' — 하한, 이보다 잔 컬일 수 있음' : '') + ')'); }).join(' · ') : '') +
+      (pc.rViews.length ? ' · ' + pc.rViews.map(function (v) { return v.a + ' ' + (v.flat ? '직선' : v.noScale ? 'dHalf ' + v.dHalf.toFixed(1) + 'px(배율 없음)' : v.cm.toFixed(1) + 'cm(' + (v.how === 'helix' ? '나선 측정 · 한 바퀴 간격 ' + v.pitchCm.toFixed(1) + 'cm · 가닥 기울기 ' + Math.round(v.beta) + '° · 반복 세기 ' + v.hxPeak.toFixed(2) + ' · ' : '') + (v.how === 'amp' ? '결 선 흔들림 폭으로 잼 · 흔들리는 선 ' + Math.round((v.wavy || 0) * 100) + '%' + (v.lamCm ? ' · 한 바퀴 길이 ' + v.lamCm.toFixed(1) + 'cm' : '') + ' · ' : '') + 'dHalf ' + v.dHalf.toFixed(1) + 'px' + (v.floor ? ' — 하한, 이보다 잔 컬일 수 있음' : '') + ')'); }).join(' · ') : '') +
       ' · 식: 반경px = ' + G.curlRk + '×(dHalf−' + G.curlR0 + ') (어림)');
     return L;
   };
@@ -1498,5 +1542,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010j — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010k — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
