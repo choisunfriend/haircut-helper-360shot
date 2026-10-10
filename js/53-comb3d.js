@@ -140,24 +140,11 @@
  *     합성 머리에서는 영상처럼 "얼굴을 가로지르는" 데까지는 재현하지 못했습니다(가려진 가닥이 움직이는 것까지만 재현) — 폰에서 확인이 필요합니다.
  *   끄기: COMB3D.depthLayer=0(깊이 안 가림) · COMB3D.reachBack=false · COMB3D.settle=0 · COMB3D.maxMove=0 · COMB3D.partFinger=false · 전부 예전으로 COMB3D.surf=false
  *
- * (2026-10-07j) 빗어 넘기기 — 사용자: "빗 기능을 가닥뿐만 아니라 머리 뭉치의 결도 변화시킬 수 있도록 해야 돼 — 말 그대로 '빗어 넘기기'도 할 수 있게.
- *   최소한의 수정부터 시작하지만, 꼭 필요할 거야." (다른 손님 스타일을 얹은 뒤 윗머리가 뜨는데 빗으로는 못 고쳤음)
- *   지금까지의 빗(정리)은 일부러 몸통 머리를 안 건드립니다(e·f). 그래서 뭉치째 방향을 바꿀 방법이 없었습니다.
- *   [넘기기] 버튼(빗질 버튼 옆)을 켜고 쓸면, 원 안에 보이는 머리(겉에서 sweepDepth 깊이까지 · 몸통 포함)가 쓴 방향으로 돕니다:
- *     · 획은 정리 획과 따로 모읍니다(C.sweeps · 방향 장도 따로). 가닥을 만들 때 정리(또는 곱슬의 가위 — 55번)를 먼저 하고 그 위에 넘기기를 겁니다.
- *       그래서 [빗질]은 예전과 한 점도 다르지 않고, 곱슬머리(55번이 빗을 가위로 바꾼 상태)에서도 넘기기는 듣습니다.
- *     · 마디가 아니라 가닥의 큰 방향(앞뒤 flowSmooth를 이은 현)을 쓴 방향으로 돌립니다 → 컬·웨이브는 모양 그대로 통째로 돕니다. 마디 길이도 그대로.
- *     · 뿌리 쪽 sweepGrip 구간은 덜 돕니다. 붓을 지난 아래쪽은 모양 그대로 따라 옮겨집니다(더 넘기려면 이어서 쓸어 주면 됨).
- *     · 쓴 방향은 화면 평면의 방향이라, 두피 가까이에서는 두상 면을 타는 방향으로 눕혀서 씁니다(sweepWrap) — 옆으로 쓸면 머리가 허공으로 뻗지 않고 두상을 감아 넘어감.
- *       두상·목 속으로는 못 들어갑니다(정리와 같은 막기). 얼굴 쪽은 안 막습니다(일부러 보내는 경우가 있으므로).
- *     · ↶는 정리·넘기기 가운데 마지막 한 획을 되돌립니다. 등록 스타일에는 아직 안 들어갑니다(이 손님 화면에서만).
- *   끄기: COMB3D.sweep=false 후 COMB3D.refresh() · 넘긴 것만 지우기: COMB3D.clearSweeps()
- *
  * 아직 안 되는 것 / 알아둘 것:
  *   · 등록 스타일에는 들어가지 않습니다(이 손님 화면에서만).
  *   · 쓰다듬는 동안 머리는 liveMs마다 다시 그립니다(가닥이 많으면 반 박자 늦게 따라옴).
  *   · 화면 쪽으로 곧장 튀어나온 잔머리는 화면에서 점으로 보여 붓에 조금만 걸립니다 — 옆에서 보이게 돌려 놓고 빗는 편이 잘 됩니다.
- *   · [빗질](정리)로는 머리를 다른 방향으로 넘길 수 없습니다(결 정렬만) — 넘기려면 [넘기기](j). 결이 갈리는 자리(가르마 바로 위)의 잔머리는 안 눕는 경우가 있습니다.
+ *   · 빗질로 머리를 다른 방향으로 넘길 수는 없습니다(결 정렬만). 결이 갈리는 자리(가르마 바로 위)의 잔머리는 안 눕는 경우가 있습니다.
  *
  * 끄기: COMB3D.enabled=false; COMB3D.refresh() · 지우기: COMB3D.clear()
  * ========================================================================== */
@@ -227,23 +214,11 @@
     settleGain: 0.6,    // 한 마디에 뜬 거리의 이 비율씩 다가감(1 = 한 번에 — 겉면의 들쭉날쭉을 그대로 따라 잔물결이 생김)
     ease: 0.5,          // 목표 방향에 직전 마디 방향을 이만큼 섞음(잔물결 제거) · 0 = 끔
     relax: 2,           // 빗긴 구간의 뾰족한 꺾임을 고르게 펴는 횟수(마디 길이는 그대로) · 0 = 끔
-    pickStrands: 8000,  // 붓 자리 찾기에 쓰는 가닥 수 상한(넘으면 건너뛰며 씀)
-    // (2026-10-07j) 빗어 넘기기 — 원 안의 머리(몸통 포함)를 쓴 방향으로 돌림(머리말 j 참고)
-    sweep: true,
-    mode: 'tidy',       // 'tidy' = 정리(잔머리를 결에 맞춤 — 지금까지의 빗) · 'sweep' = 넘기기
-    sweepStrength: 0.6, // 한 표본이 돌리는 세기(겹쳐 쓸면 1까지 쌓임)
-    sweepGrip: 0.12,    // 가닥의 앞 12%(뿌리 쪽)는 덜 돎
-    sweepTol: 3,        // 도: 큰 방향이 쓴 방향에서 이 안쪽이면 안 건드림
-    sweepDepth: 0.2,    // 넘기기 붓에 걸리는 깊이(≈ 3.8cm — 뭉치의 속까지 같이 넘어가게 · 정리는 depthLayer 2.5cm)
-    sweepWrap: true,    // 두피 가까이에서는 쓴 방향을 두상 면을 타는 방향으로 눕혀 씀
-    wrapNear: 1.15, wrapFar: 1.5   // 두피 타원체의 이 배수 안쪽은 온전히 면을 탐 · 이 배수 밖은 쓴 방향 그대로(사이는 서서히)
+    pickStrands: 8000   // 붓 자리 찾기에 쓰는 가닥 수 상한(넘으면 건너뛰며 씀)
   }, W.COMB3D || {});
-  C.sweeps = [];        // (j) 넘기기 표본 — 모양은 samples와 같음
-  if (C.mode !== 'sweep') C.mode = 'tidy';
   C.samples = [];       // {dabs: Float32Array[x,y,z,w …], m, dx,dy,dz, k, g}
   var S = C.stats = { strokes: 0, touched: 0, _t: 0, ms: 0, pickMs: 0, pickPts: 0, pickFly: 0, pickHidden: 0, reached: 0, dabs: 0, seen: 0, tOwn: 0, tSide: 0, tAll: 0, tReach: 0, tFinger: 0, tSkip: 0, _to: 0, _ts: 0, _ta: 0, _tr: 0, _tf: 0, _tk: 0, pushed: 0, neck: 0, _pu: 0, _nk: 0, anch: 0, pin: 0, _an: 0, _pi: 0, fly: 0, _fl: 0, up: 0, _up: 0, clamp: 0, _cl: 0, surfRef: 0, surfCells: 0, flowRef: 0, flowCells: 0, flowMs: 0, err: null };
   var ver = 0, gid = 0, modelRef = null;
-  S._sw = 0; S._swp = 0; S.swept = 0; S.sweptPush = 0; S.sweepStrokes = 0;
 
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
   function scr() { try { return currentScreen; } catch (e) { return ''; } }
@@ -292,13 +267,6 @@
     if (!F || fEpoch !== epoch || fDone > n) { F = newField(); fDone = 0; fEpoch = epoch; }
     for (; fDone < n; fDone++) splat(F, C.samples[fDone]);
     return n ? F : null;
-  }
-  var F2 = null, f2Done = 0, f2Epoch = 0;             // (j) 넘기기 방향 장
-  function syncSweep() {
-    var n = C.sweeps.length;
-    if (!F2 || f2Epoch !== epoch || f2Done > n) { F2 = newField(); f2Done = 0; f2Epoch = epoch; }
-    for (; f2Done < n; f2Done++) splat(F2, C.sweeps[f2Done]);
-    return n ? F2 : null;
   }
   /* 두상(두피 타원체 · 가운데 높이) — 가닥마다 다시 재지 않게 잠깐 기억(47번과 같은 방식) */
   var headMemo = null, headAt = -1e9, headKey = null;
@@ -824,154 +792,20 @@
   /* 진단용: 그 자리가 몸통 겉면에서 얼마나 떠 있나(모델 단위 · 몸통 속 0 · 거리장이 없으면 null) */
   C._dist = function (x, y, z) { return (flowMemo && flowMemo.flow && flowMemo.flow.DF) ? distAt(flowMemo.flow.DF, x, y, z) : null; };
 
-  /* ────────────────────────────────────────────────────────────────────────
-   * (2026-10-07j) 빗어 넘기기 — cur: 지금 점(정리까지 한 것) · pre: 빗기 전 점(붓은 여기에 칠함 → 방향 장도 여기서 읽음)
-   *   마디마다 가닥의 큰 방향을 쓴 방향으로 돌리는 회전을 구해(세기 = 칠해진 세기 × 뿌리 잡기) 이웃끼리 한 번 고르게 한 뒤 다시 이음.
-   *   몸통·잔머리를 안 가립니다(넘기기는 뭉치째 돌리는 것). 두상·목 속으로는 못 들어감.
-   * ────────────────────────────────────────────────────────────────────── */
-  function applySweep(cur, pre) {
-    if (!C.enabled || !C.sweep || !C.sweeps.length || !cur || cur.length < 2) return cur;
-    var f = syncSweep(); if (!f || !f.n) return cur;
-    var n = cur.length, i, p, q0, mn = f.mn, mx = f.mx, any = false;
-    if (!pre || pre.length !== n) pre = cur;
-    for (i = 0; i < n; i++) { p = pre[i]; if (p.x >= mn[0] && p.x <= mx[0] && p.y >= mn[1] && p.y <= mx[1] && p.z >= mn[2] && p.z <= mx[2]) { any = true; break; } }
-    if (!any) return cur;
-    if (buf.length < n * 4) { buf = new Float64Array(n * 4 + 128); rbuf = new Float64Array(n * 3 + 96); wbuf = new Float64Array(n + 32); pbuf = new Float64Array(n + 32); kbuf = new Int32Array(n + 32); }
-    var cell = C.cell, map = f.map, V = f.V, last = n - 1, U = buf, R = rbuf, changed = false, lo = n, hi = 0, L = 0;
-    var px = cur[0].x, py = cur[0].y, pz = cur[0].z, sx, sy, sz, sl, len;
-    for (i = 1; i < n; i++) {
-      p = cur[i]; sx = p.x - px; sy = p.y - py; sz = p.z - pz; len = Math.sqrt(sx * sx + sy * sy + sz * sz);
-      if (len > 1e-9) { U[i * 4] = sx / len; U[i * 4 + 1] = sy / len; U[i * 4 + 2] = sz / len; } else { U[i * 4] = 0; U[i * 4 + 1] = -1; U[i * 4 + 2] = 0; }
-      U[i * 4 + 3] = len; L += len; px = p.x; py = p.y; pz = p.z;
-    }
-    var hw = L > 0 ? Math.round(C.flowSmooth / (L / last)) : 1; if (!(hw >= 1)) hw = 1; else if (hw > 16) hw = 16;
-    var HD = headShape(), a2 = 1, b2 = 1, c2 = 1, hcy = 0, wn = C.wrapNear, wf = Math.max(C.wrapFar, wn + 1e-3), grip = C.sweepGrip, tol = Math.max(0, C.sweepTol) * DEG;
-    if (HD) { a2 = HD.a2; b2 = HD.b2; c2 = HD.c2; hcy = HD.cy; }
-    var a, b, c, k, vx, vy, vz, vl, w, t, tx, ty, tz, A, B, dot, th, ang, cx, cy, cz, cl, nx, ny, nz, nl, dn, ee, yy, kk, mxx, myy, mzz;
-    for (i = 1; i < n; i++) {
-      R[i * 3] = 0; R[i * 3 + 1] = 0; R[i * 3 + 2] = 0;
-      if (!(U[i * 4 + 3] > 1e-9)) continue;
-      p = pre[i]; q0 = pre[i - 1];
-      a = Math.floor((p.x + q0.x) * 0.5 / cell) + OFF; b = Math.floor((p.y + q0.y) * 0.5 / cell) + OFF; c = Math.floor((p.z + q0.z) * 0.5 / cell) + OFF;
-      if (a < 0 || b < 0 || c < 0 || a >= SPAN || b >= SPAN || c >= SPAN) continue;
-      k = map.get(a + SPAN * (b + SPAN * c)); if (k === undefined) continue;
-      k *= 3; vx = V[k]; vy = V[k + 1]; vz = V[k + 2]; vl = Math.sqrt(vx * vx + vy * vy + vz * vz); w = vl;
-      if (!(w > 0.01)) continue;
-      t = i / last; if (grip > 0 && t < grip) w *= t / grip;
-      if (w > 1) w = 1;
-      tx = vx / vl; ty = vy / vl; tz = vz / vl;
-      p = cur[i]; q0 = cur[i - 1];
-      if (HD && C.sweepWrap) {                                            // 두피 가까이: 쓴 방향에서 두상 면에 수직인 몫을 뺌(면을 타고 넘어가게)
-        mxx = (p.x + q0.x) * 0.5; myy = (p.y + q0.y) * 0.5 - hcy; mzz = (p.z + q0.z) * 0.5;
-        ee = Math.sqrt(mxx * mxx / a2 + myy * myy / b2 + mzz * mzz / c2);
-        if (ee < wf) {
-          nx = mxx / a2; ny = myy / b2; nz = mzz / c2; nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
-          if (nl > 1e-9) {
-            nx /= nl; ny /= nl; nz /= nl; kk = ee <= wn ? 1 : (wf - ee) / (wf - wn); dn = (tx * nx + ty * ny + tz * nz) * kk;
-            sx = tx - dn * nx; sy = ty - dn * ny; sz = tz - dn * nz; sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
-            if (sl < 0.2) continue;                                       // 두피에 거의 수직으로 쓴 것 — 눕힐 쪽이 없음
-            tx = sx / sl; ty = sy / sl; tz = sz / sl;
-          }
-        }
-      }
-      A = cur[i - 1 - hw < 0 ? 0 : i - 1 - hw]; B = cur[i + hw > last ? last : i + hw];
-      sx = B.x - A.x; sy = B.y - A.y; sz = B.z - A.z; sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
-      if (sl > 1e-9) { sx /= sl; sy /= sl; sz /= sl; } else { sx = U[i * 4]; sy = U[i * 4 + 1]; sz = U[i * 4 + 2]; }
-      dot = sx * tx + sy * ty + sz * tz; if (dot > 1) dot = 1; else if (dot < -1) dot = -1;
-      th = Math.acos(dot); if (th <= tol) continue;
-      ang = th * w; if (ang < 0.003) continue;
-      cx = sy * tz - sz * ty; cy = sz * tx - sx * tz; cz = sx * ty - sy * tx; cl = Math.sqrt(cx * cx + cy * cy + cz * cz);
-      if (cl < 1e-4) {                                                     // 거의 정반대 — 두상 바깥을 지나 돌게(두상이 없으면 아무 수직축)
-        nx = p.x; ny = HD ? p.y - hcy : 0; nz = p.z;
-        cx = sy * nz - sz * ny; cy = sz * nx - sx * nz; cz = sx * ny - sy * nx; cl = Math.sqrt(cx * cx + cy * cy + cz * cz);
-        if (cl < 1e-6) { if (Math.abs(sx) < 0.9) { cx = 0; cy = sz; cz = -sy; } else { cx = -sz; cy = 0; cz = sx; } cl = Math.sqrt(cx * cx + cy * cy + cz * cz); }
-        if (!(cl > 1e-9)) continue;
-      }
-      ang /= cl; R[i * 3] = cx * ang; R[i * 3 + 1] = cy * ang; R[i * 3 + 2] = cz * ang;
-      changed = true; if (i < lo) lo = i; if (i > hi) hi = i;
-    }
-    if (!changed) return cur;
-    var s0 = Math.max(1, lo - 1), s1 = Math.min(last, hi + 1), o0x, o0y, o0z, c0x, c0y, c0z, j;
-    j = (s0 > 1 ? s0 - 1 : s0) * 3; o0x = R[j]; o0y = R[j + 1]; o0z = R[j + 2];
-    for (i = s0; i <= s1; i++) {                                           // 회전을 이웃 마디끼리 한 번 고르게(잔물결 제거 · 컬은 그대로)
-      j = i * 3; c0x = R[j]; c0y = R[j + 1]; c0z = R[j + 2];
-      if (i < last) { R[j] = (o0x + 2 * c0x + R[j + 3]) * 0.25; R[j + 1] = (o0y + 2 * c0y + R[j + 4]) * 0.25; R[j + 2] = (o0z + 2 * c0z + R[j + 5]) * 0.25; }
-      else { R[j] = (o0x + 3 * c0x) * 0.25; R[j + 1] = (o0y + 3 * c0y) * 0.25; R[j + 2] = (o0z + 3 * c0z) * 0.25; }
-      o0x = c0x; o0y = c0y; o0z = c0z;
-    }
-    var out = new Array(n), CH = (C.collide && HD) ? HD : null, NK = null, lift = C.headLift > 0 ? C.headLift : 1.02;
-    var ax, ay, az, kx, ky, kz, cs, sn, kd, ex, ey, ez, fl, o, pt, r;
-    if (CH) { try { NK = (W.REGROW && typeof W.REGROW.neckPush === 'function') ? W.REGROW.neckPush : null; } catch (e3) { NK = null; } }
-    for (i = 0; i < s0; i++) out[i] = cur[i];
-    var qx = cur[s0 - 1].x, qy = cur[s0 - 1].y, qz = cur[s0 - 1].z;
-    for (i = s0; i < n; i++) {
-      ax = U[i * 4]; ay = U[i * 4 + 1]; az = U[i * 4 + 2]; len = U[i * 4 + 3];
-      if (i <= s1) {
-        kx = R[i * 3]; ky = R[i * 3 + 1]; kz = R[i * 3 + 2]; ang = Math.sqrt(kx * kx + ky * ky + kz * kz);
-        if (ang > 1e-5) {
-          kx /= ang; ky /= ang; kz /= ang; cs = Math.cos(ang); sn = Math.sin(ang); kd = (kx * ax + ky * ay + kz * az) * (1 - cs);
-          tx = ax * cs + (ky * az - kz * ay) * sn + kx * kd; ty = ay * cs + (kz * ax - kx * az) * sn + ky * kd; tz = az * cs + (kx * ay - ky * ax) * sn + kz * kd;
-          ax = tx; ay = ty; az = tz;
-        }
-      }
-      ex = qx + ax * len; ey = qy + ay * len; ez = qz + az * len;
-      if (CH && len > 1e-9) {                                              // 두상 속으로는 못 들어감 — 넘기기 전부터 안쪽이던 점(뿌리 등)은 그 깊이까지만
-        o = cur[i]; yy = o.y - hcy;
-        fl = Math.sqrt(o.x * o.x / a2 + yy * yy / b2 + o.z * o.z / c2); if (fl > lift) fl = lift;
-        yy = ey - hcy; ee = Math.sqrt(ex * ex / a2 + yy * yy / b2 + ez * ez / c2);
-        if (ee < fl - 1e-6) {
-          yy = qy - hcy; nx = qx / a2; ny = yy / b2; nz = qz / c2; nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
-          if (nl > 1e-9) {
-            nx /= nl; ny /= nl; nz /= nl; dn = ax * nx + ay * ny + az * nz;
-            if (dn < 0) {
-              tx = ax - dn * nx; ty = ay - dn * ny; tz = az - dn * nz; sl = Math.sqrt(tx * tx + ty * ty + tz * tz);
-              if (sl > 1e-3) { ex = qx + tx / sl * len; ey = qy + ty / sl * len; ez = qz + tz / sl * len; }
-            }
-          }
-          yy = ey - hcy; ee = Math.sqrt(ex * ex / a2 + yy * yy / b2 + ez * ez / c2);
-          if (ee < fl - 1e-6 && ee > 1e-9) {
-            kk = fl / ee; ex *= kk; ey = hcy + yy * kk; ez *= kk;
-            tx = ex - qx; ty = ey - qy; tz = ez - qz; sl = Math.sqrt(tx * tx + ty * ty + tz * tz);
-            if (sl > 1e-9) { ex = qx + tx / sl * len; ey = qy + ty / sl * len; ez = qz + tz / sl * len; }
-          }
-          S._swp++;
-        }
-      }
-      pt = { x: ex, y: ey, z: ez };
-      if (NK && len > 1e-9) {
-        try {
-          r = NK(pt);
-          if (r && r !== pt && NK(cur[i]) === cur[i]) {
-            tx = r.x - qx; ty = r.y - qy; tz = r.z - qz; sl = Math.sqrt(tx * tx + ty * ty + tz * tz);
-            if (sl > 1e-9) pt = { x: qx + tx / sl * len, y: qy + ty / sl * len, z: qz + tz / sl * len };
-          }
-        } catch (e4) {}
-      }
-      qx = pt.x; qy = pt.y; qz = pt.z; out[i] = pt;
-    }
-    S._sw++;
-    try { out._pre = cur._pre || pre; } catch (e2) {}
-    return out;
-  }
-  C._sweep = applySweep;
-
   var prevComb = W.combStrand3D;
   W.combStrand3D = function (g) {
     var r = typeof prevComb === 'function' ? prevComb.apply(this, arguments) : g;
-    if (!C.samples.length && !C.sweeps.length) return r;
-    var o = r;
-    if (C.samples.length) { try { o = applySamples(r); } catch (e) { S.err = String(e && e.message || e); o = r; } }
-    if (C.sweeps.length) { try { o = applySweep(o, r); } catch (e) { S.err = String(e && e.message || e); } }      // (j) 정리 다음에 넘기기 — 방향 장은 빗기 전 자리(r)에서 읽음
-    return o;
+    if (!C.samples.length) return r;
+    try { return applySamples(r); } catch (e) { S.err = String(e && e.message || e); return r; }
   };
   /* 머리 모델이 바뀌면 빗질을 지움(다른 사진 · 마네킹 켬/끔 · 다시 기르기) */
   function checkModel() {
     var m = null; try { m = state.hair3Dneutral; } catch (e) {}
-    if (m !== modelRef) { modelRef = m; if (C.samples.length || C.sweeps.length) { C.samples.length = 0; C.sweeps.length = 0; ver++; epoch++; syncBtn(); } }
+    if (m !== modelRef) { modelRef = m; if (C.samples.length) { C.samples.length = 0; ver++; epoch++; syncBtn(); } }
   }
   var origCA = W.computeAdjustedHair3DStrands;
   if (typeof origCA === 'function') W.computeAdjustedHair3DStrands = function () {
-    try { checkModel(); S._t = 0; S._pu = 0; S._nk = 0; S._an = 0; S._pi = 0; S._fl = 0; S._up = 0; S._cl = 0; S._to = S._ts = S._ta = S._tr = S._tf = S._tk = 0; S._sw = 0; S._swp = 0; } catch (e) {}
+    try { checkModel(); S._t = 0; S._pu = 0; S._nk = 0; S._an = 0; S._pi = 0; S._fl = 0; S._up = 0; S._cl = 0; S._to = S._ts = S._ta = S._tr = S._tf = S._tk = 0; } catch (e) {}
     var t0 = now(), out = origCA.apply(this, arguments);
     try {                                                                 // 빗질이 있는데 머리 모양(길이·컬 등)이 바뀌었으면 결을 다시 읽어 둠(전체 목록을 만든 호출에서만)
       if (C.grain && C.samples.length && out && out.length && !arguments[0] && !(arguments[1] > 1) && modelRef) {
@@ -979,7 +813,6 @@
         if (fmB && fmB !== flowMemo && typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump();      // 방금 목록은 옛 결로 만든 것 → 다음 호출에서 새로
       }
     } catch (eF) {}
-    if (S._sw > 0) { S.swept = S._sw; S.sweptPush = S._swp; if (!(S._t > 0)) S.ms = now() - t0; } else if (!C.sweeps.length) { S.swept = 0; S.sweptPush = 0; }
     if (S._t > 0 || S._tk > 0) { S.touched = S._t; S.ms = now() - t0; S.pushed = S._pu; S.neck = S._nk; S.anch = S._an; S.pin = S._pi; S.fly = S._fl; S.up = S._up; S.clamp = S._cl; S.tOwn = S._to; S.tSide = S._ts; S.tAll = S._ta; S.tReach = S._tr; S.tFinger = S._tf; S.tSkip = S._tk; }          // 캐시에서 나온 호출은 세지 않음
     return out;
   };
@@ -991,13 +824,11 @@
     try { if (scr() === 'adjust' && typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   }
   C.refresh = function () { ver++; epoch++; redraw(); syncBtn(); };
-  C.clear = function () { if (!C.samples.length && !C.sweeps.length) return; C.samples.length = 0; C.sweeps.length = 0; ver++; epoch++; S.strokes = 0; S.sweepStrokes = 0; redraw(); syncBtn(); };
-  C.clearSweeps = function () { if (!C.sweeps.length) return; C.sweeps.length = 0; ver++; epoch++; S.sweepStrokes = 0; redraw(); syncBtn(); };
-  C.undo = function () {                    // 정리·넘기기 가운데 마지막 한 획
-    var ga = C.samples.length ? C.samples[C.samples.length - 1].g : -1, gb = C.sweeps.length ? C.sweeps[C.sweeps.length - 1].g : -1;
-    if (ga < 0 && gb < 0) return;
-    var A = gb > ga ? C.sweeps : C.samples, g = Math.max(ga, gb);
-    while (A.length && A[A.length - 1].g === g) A.pop();
+  C.clear = function () { if (!C.samples.length) return; C.samples.length = 0; ver++; epoch++; S.strokes = 0; redraw(); syncBtn(); };
+  C.undo = function () {
+    if (!C.samples.length) return;
+    var g = C.samples[C.samples.length - 1].g;
+    while (C.samples.length && C.samples[C.samples.length - 1].g === g) C.samples.pop();
     ver++; epoch++; redraw(); syncBtn();
   };
 
@@ -1239,15 +1070,14 @@
     // (2026-10-05i) 보이는 겉층만 — 화면의 visCell px 칸마다 카메라에 가장 가까운 점의 깊이를 재고, 그보다 depthLayer(≈ 2.5cm) 넘게 뒤에 있는 점은 붓에 안 걸림.
     //   예전에는 원 안이면 두상 가운데 깊이까지 전부 걸렸습니다 → 뒤에서 빗는데 그 뒤에 겹쳐 있던 옆머리·목 옆 머리·얼굴 옆 머리까지 칠해짐(사용자 영상: "뒤만 빗었는데 목덜미와 얼굴로 가닥이 튀어나옴").
     var VIS = null, hidden = 0;
-    var dLay = (C.mode === 'sweep' && C.sweep) ? C.sweepDepth : C.depthLayer;      // (j) 넘기기는 뭉치의 속까지
-    if (FM && dLay > 0) {
+    if (FM && C.depthLayer > 0) {
       var vc = Math.max(2, C.visCell), vw = Math.ceil(rect.width / vc) + 1, vh = Math.ceil(rect.height / vc) + 1, ZM = new Float32Array(vw * vh).fill(Infinity), vi;
       for (i = 0; i < n; i++) { vi = (SY[i] / vc | 0) * vw + (SX[i] / vc | 0); if (SW[i] < ZM[vi]) ZM[vi] = SW[i]; }
       VIS = new Uint8Array(n);
-      for (i = 0; i < n; i++) { if (SW[i] <= ZM[(SY[i] / vc | 0) * vw + (SX[i] / vc | 0)] + dLay) VIS[i] = 1; else if (SW[i] <= wMax) hidden++; }
+      for (i = 0; i < n; i++) { if (SW[i] <= ZM[(SY[i] / vc | 0) * vw + (SX[i] / vc | 0)] + C.depthLayer) VIS[i] = 1; else if (SW[i] <= wMax) hidden++; }
     }
     S.pickMs = now() - t0; S.pickPts = n; S.pickFly = extra; S.pickHidden = hidden;
-    return { sweep: (C.mode === 'sweep' && C.sweep), DF: DFp, FM: FM, list: list, e: e, wMax: wMax, SX: SX, SY: SY, SW: SW, PX: PX, PY: PY, PZ: PZ, SI: SI, SK: SK, FL: FL, VIS: VIS, head: head, next: next, cell: cell, gw: gw, gh: gh, rect: rect, right: right, up: up,
+    return { DF: DFp, FM: FM, list: list, e: e, wMax: wMax, SX: SX, SY: SY, SW: SW, PX: PX, PY: PY, PZ: PZ, SI: SI, SK: SK, FL: FL, VIS: VIS, head: head, next: next, cell: cell, gw: gw, gh: gh, rect: rect, right: right, up: up,
       perPx: function (w) { return 2 * w * Math.tan(cam.fov * Math.PI / 360) / rect.height; } };
   }
   function pickAt(pk, x, y, rad) {
@@ -1291,7 +1121,7 @@
       i = gatherBuf[k];
       ddx = pk.SX[i] - x; ddy = pk.SY[i] - y; wgt = Math.pow(1 - Math.sqrt(ddx * ddx + ddy * ddy) / rad, C.falloff);
       put(pk.PX[i], pk.PY[i], pk.PZ[i], wgt, FL ? FL[i] : 0);
-      if (FL && FL[i] && C.reachBack && !pk.sweep) {                                    // 붓에 걸린 뜬 점 → 그 가닥을 기억(가장 끝 쪽 점 · 가장 큰 가중)
+      if (FL && FL[i] && C.reachBack) {                                    // 붓에 걸린 뜬 점 → 그 가닥을 기억(가장 끝 쪽 점 · 가장 큰 가중)
         if (!touched) touched = new Map();
         tv = touched.get(pk.SI[i]);
         if (tv === undefined) touched.set(pk.SI[i], [pk.SK[i], wgt]); else { if (pk.SK[i] > tv[0]) tv[0] = pk.SK[i]; if (wgt > tv[1]) tv[1] = wgt; }
@@ -1364,16 +1194,15 @@
     if (st.has && Math.hypot(x - st.sx, y - st.sy) < C.spacing * rPx) return;        // 원 반지름의 spacing만큼 움직일 때마다 한 번
     var gth = gather(pk, x, y, rPx);
     if (!gth) return;                                                     // 원 안에 보이는 머리가 없음
-    if (C.samples.length + C.sweeps.length >= C.maxSamples) { if (!st.full) { st.full = true; try { showToast(lang() === 'ko' ? '빗질이 너무 많아요 — ↶로 되돌리거나 지워 주세요' : 'Too many comb strokes — undo or clear some'); } catch (e) {} } return; }
-    if (pk.sweep) C.sweeps.push({ dabs: gth.dabs, m: gth.m, dx: dx / dl, dy: dy / dl, dz: dz / dl, k: C.sweepStrength, g: st.g });      // (j) 넘기기 획은 따로
-    else C.samples.push({ dabs: gth.dabs, m: gth.m, dx: dx / dl, dy: dy / dl, dz: dz / dl, k: C.strength, g: st.g });
+    if (C.samples.length >= C.maxSamples) { if (!st.full) { st.full = true; try { showToast(lang() === 'ko' ? '빗질이 너무 많아요 — ↶로 되돌리거나 지워 주세요' : 'Too many comb strokes — undo or clear some'); } catch (e) {} } return; }
+    C.samples.push({ dabs: gth.dabs, m: gth.m, dx: dx / dl, dy: dy / dl, dz: dz / dl, k: C.strength, g: st.g });
     st.sx = x; st.sy = y; st.has = true; st.n++; S.dabs = gth.m; S.seen = gth.seen; S.reached = gth.reached || 0;
     ver++; live();
   }
   function endStroke() {
     var st = stroke; stroke = null;
     if (!st) return;
-    if (st.n) { if (st.sweep) S.sweepStrokes = (S.sweepStrokes || 0) + 1; else S.strokes++; if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; } redraw(); }
+    if (st.n) { S.strokes++; if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; } redraw(); }
     syncBtn();
   }
   function onDown(e) {
@@ -1390,7 +1219,7 @@
     var pk = null; try { pk = buildPick(); } catch (x) { S.err = String(x && x.message || x); }
     if (!pk) return;
     var rc = pk.rect, oy = e.pointerType === 'touch' ? C.touchOffset : 0, x0 = e.clientX - rc.left, y0 = e.clientY - rc.top - oy;
-    stroke = { sweep: !!pk.sweep, id: e.pointerId, pk: pk, oy: oy, lx: x0, ly: y0, vx: 0, vy: 0, trail: [x0, y0], has: false, n: 0, g: ++gid, cx: 0, cy: 0, cz: 0, sx: 0, sy: 0, sz: 0, w: 0 };
+    stroke = { id: e.pointerId, pk: pk, oy: oy, lx: x0, ly: y0, vx: 0, vy: 0, trail: [x0, y0], has: false, n: 0, g: ++gid, cx: 0, cy: 0, cz: 0, sx: 0, sy: 0, sz: 0, w: 0 };
     var i0 = pickAt(pk, x0, y0, C.radiusPx);
     if (i0 >= 0) stroke.w = pk.SW[i0];
     showMark(x0, y0, i0 >= 0 ? Math.min(C.maxRadius, C.radiusPx * pk.perPx(pk.SW[i0])) / pk.perPx(pk.SW[i0]) : null, null);
@@ -1471,33 +1300,25 @@
    * ④ 버튼
    * ────────────────────────────────────────────────────────────────────── */
   function lang() { try { return uiLang === 'ko' ? 'ko' : 'en'; } catch (e) { return 'ko'; } }
-  var btn = null, undoBtn = null, sweepBtn = null;
+  var btn = null, undoBtn = null;
   function syncBtn() {
     try {
       if (!btn) return;
-      var show = C.enabled && a3on(), sw = C.on && C.mode === 'sweep' && C.sweep;
+      var show = C.enabled && a3on();
       btn.style.display = show ? '' : 'none';
-      btn.classList.toggle('on', !!C.on && !sw);
-      btn.textContent = (C.on && !sw) ? '빗질 ON' : '빗질 OFF';
-      if (sweepBtn) { sweepBtn.style.display = show && C.sweep ? '' : 'none'; sweepBtn.classList.toggle('on', !!sw); sweepBtn.textContent = sw ? '넘기기 ON' : '넘기기 OFF'; }
+      btn.classList.toggle('on', !!C.on);
+      btn.textContent = C.on ? '빗질 ON' : '빗질 OFF';
       undoBtn.style.display = show && C.on ? '' : 'none';
-      undoBtn.disabled = !(C.samples.length || C.sweeps.length);
-      if (mark) { var r2 = mark.querySelector('#comb3dRing2'); if (r2) r2.setAttribute('stroke', sw ? '#3b82c4' : '#c9874a'); }
+      undoBtn.disabled = !C.samples.length;
       var m = m3(); if (m && m.container && m.container.id === 'adjust3dHost') m.renderer.domElement.style.cursor = C.on ? 'crosshair' : '';
     } catch (e) {}
   }
-  C.toggle = function (v, mode) {           // mode: 'tidy'(기본) | 'sweep' — 다른 쪽이 켜져 있으면 그쪽으로 바꿈
-    mode = (mode === 'sweep' && C.sweep) ? 'sweep' : 'tidy';
-    if (v == null) v = !(C.on && C.mode === mode);
-    if (stroke) endStroke();
-    C.on = !!v; if (C.on) C.mode = mode;
+  C.toggle = function (v) {
+    C.on = (v == null) ? !C.on : !!v;
+    if (!C.on && stroke) endStroke();
     syncBtn();
-    if (C.on && mode === 'sweep') {
-      restMark(); syncBtn();
-      try { showToast(lang() === 'ko' ? '넘기고 싶은 머리에 빗(원)을 올리고 보낼 방향으로 쓸어 주세요 — 원 안의 머리가 뭉치째 그 방향으로 넘어갑니다 · 이어서 쓸면 더 넘어가요 · ↶ 되돌리기'
-        : 'Put the comb (circle) on the hair and stroke the way you want it to go — the whole bundle inside the circle turns that way · keep stroking to carry it further · ↶ undo'); } catch (e) {}
-    } else if (C.on) {
-      restMark(); syncBtn();
+    if (C.on) {
+      restMark();
       try { showToast(lang() === 'ko' ? '뜬 머리에 빗(원)을 올리고 결대로 쓸어 주세요 — 주변 머리의 결에 맞춰 눕습니다 · 빗은 손가락 조금 위에 있어요 · 두 손가락: 이동·확대'
         : 'Put the comb (circle) on the flyaways and sweep along the hair — they lie down into the surrounding flow · the comb sits just above your finger · two fingers: move / zoom'); } catch (e) {}
     } else hideMark();
@@ -1513,18 +1334,13 @@
       if (mq && mq.className) undoBtn.className = mq.className;
       undoBtn.textContent = '↶'; undoBtn.title = '마지막 빗질 한 획 되돌리기';
       undoBtn.addEventListener('click', function () { C.undo(); });
-      sweepBtn = document.createElement('button'); sweepBtn.id = 'comb3dSweepBtn'; sweepBtn.type = 'button';
-      if (mq && mq.className) sweepBtn.className = mq.className;
-      sweepBtn.title = '켜면 한 손가락 드래그가 빗어 넘기기가 됩니다 — 원 안의 머리가 뭉치째 쓴 방향으로 넘어갑니다';
-      sweepBtn.addEventListener('click', function () { C.toggle(null, 'sweep'); });
-      bar.appendChild(btn); bar.appendChild(sweepBtn); bar.appendChild(undoBtn);
+      bar.appendChild(btn); bar.appendChild(undoBtn);
       syncBtn();
     }
   } catch (e) { console.warn(TAG + ' 버튼 만들기 실패', e); }
   try {
     if (typeof I18N !== 'undefined') {
-      Object.assign(I18N, { '빗질 ON': 'Comb ON', '빗질 OFF': 'Comb OFF', '넘기기 ON': 'Sweep ON', '넘기기 OFF': 'Sweep OFF',
-        '켜면 한 손가락 드래그가 빗어 넘기기가 됩니다 — 원 안의 머리가 뭉치째 쓴 방향으로 넘어갑니다': 'When on, a one-finger drag sweeps — the whole bundle inside the circle turns the way you stroke',
+      Object.assign(I18N, { '빗질 ON': 'Comb ON', '빗질 OFF': 'Comb OFF',
         '켜면 한 손가락 드래그가 빗질이 됩니다 — 잔머리를 결 방향으로 쓰다듬어 눕힙니다': 'When on, a one-finger drag combs — stroke flyaways along the hair flow to lay them down',
         '마지막 빗질 한 획 되돌리기': 'Undo the last comb stroke' });
       try { _i18nSubKeys = null; } catch (e) {}
@@ -1557,7 +1373,6 @@
     var L = ppl.apply(this, arguments) || [];
     try {
       L.push(TAG + ' ' + (C.enabled ? (C.on ? '켜짐(빗질 모드)' : '대기') : '꺼짐') + ' · 획 ' + S.strokes + ' · 표본 ' + C.samples.length + '/' + C.maxSamples +
-        ' · 넘기기 ' + (C.sweep ? (C.on && C.mode === 'sweep' ? '켜짐' : '대기') + ' — 획 ' + (S.sweepStrokes || 0) + ' · 표본 ' + C.sweeps.length + ' · 직전에 넘어간 가닥 ' + (S.swept || 0) + '(두상에 막혀 눕힌 마디 ' + (S.sweptPush || 0) + ') · 방향 장 ' + (F2 ? F2.n : 0) + '칸' : '꺼짐(COMB3D.sweep=false)') +
         ' · 직전에 바뀐 가닥 ' + S.touched + ' · 가닥 만들기 ' + Math.round(S.ms) + 'ms(빗질 포함) · 붓 자리 찾기 준비 ' + Math.round(S.pickMs) + 'ms(점 ' + S.pickPts + ') · 직전 표본이 칠한 점 ' + S.dabs + '(원 안에 보인 점 ' + S.seen + ')' +
         ' · 방향 장 ' + (F ? F.n : 0) + '칸 · 붓 ' + C.radiusPx + 'px(상한 ' + C.maxRadius + ' · 지금 화면에서 ' + Math.round(markR) + 'px) · 세기 ' + C.strength + ' · 터치 빗 위치 손가락 위 ' + C.touchOffset + 'px' + (S.err ? ' · ⚠ ' + S.err : ''));
       L.push('  결 따라 빗기 ' + (C.grain ? (flowMemo && flowMemo.flow ? '켜짐 — 결 칸 ' + S.flowCells + ' · 몸통 머리 보통 밀도 칸당 ' + S.flowRef + '가닥 · 결 읽기 ' + Math.round(S.flowMs) + 'ms' : '켜짐(아직 결을 안 읽음 — 빗을 대면 읽음)') : '꺼짐(손가락 방향 그대로)') +
@@ -1572,5 +1387,5 @@
     return L;
   };
 
-  console.log(TAG + ' 설치 — 3D 조정 화면에서 [빗질]을 켜고 잔머리를 결 방향으로 쓰다듬으면 그 방향으로 눕습니다 · [넘기기]를 켜고 쓸면 원 안의 머리가 뭉치째 그 방향으로 넘어갑니다. 지우기 COMB3D.clear() · 되돌리기 COMB3D.undo()');
+  console.log(TAG + ' 설치 — 3D 조정 화면에서 [빗질]을 켜고 잔머리를 결 방향으로 쓰다듬으면 그 방향으로 눕습니다. 지우기 COMB3D.clear() · 되돌리기 COMB3D.undo()');
 })();

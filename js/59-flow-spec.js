@@ -145,7 +145,6 @@
     nativeCurl: 40,      // 잰 컬이 이 값 이상이면 원본 = 다시 기른 머리(42번이 결 정렬을 끄는 기준과 같은 값) · 0 = 컬과 무관하게 마네킹+표
     natResMax: 75,       // 도: 가닥이 제 결에서 벗어나 있던 각을 이만큼까지만 인정(거꾸로 간 가닥은 이 각으로 눌림)
     natLenMin: 0.25, natLenMax: 4,   // 길이 배수(스타일 길이 ÷ 제 칸 길이)의 한도
-    natTail: 1.1, natTailFull: 2,    // (g) 늘릴 때: 제 칸보다 긴 가닥도 스타일 칸 길이의 natTail배까지만(배수 natTailFull 이상에서 온전히) · 0 = 안 누름
     nativeWaitMs: 25000, // 다시 기르기를 이만큼 기다려도 안 끝나면 마네킹 방식으로 겁니다
     guardNeck: true,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
     fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
@@ -569,19 +568,7 @@
     if (!(A > 1e-6)) return null;
     var ratio = (own && own.L > 1e-3 && sty.L > 1e-3) ? sty.L / own.L : 1;
     if (ratio < cfg.natLenMin) ratio = cfg.natLenMin; if (ratio > cfg.natLenMax) ratio = cfg.natLenMax;
-    var T = A * ratio;
-    // (2026-10-07g) 혼자 긴 가닥 누르기 — 제 칸보다 몇 배 긴 가닥(잔머리·지나쳐 기른 가닥)에 길이 배수를 그대로 곱하면 스타일보다 훨씬 긴 꼬리가 됨
-    //   (실제: 짧은 머리 남자에 긴 펌 스타일 → 가슴 아래까지 늘어진 곧은 가닥 몇 줄). 늘리는 경우에만, 스타일 칸 길이 × natTail까지만.
-    //   배수가 1(같은 길이의 스타일)이면 손님 가닥 그대로이고, 배수 natTailFull 이상에서 온전히 누름(사이는 서서히 — 뚝 끊기지 않게).
-    if (cfg.natTail > 0 && ratio > 1 && own && own.L > 1e-3 && sty.L > 1e-3) {
-      var fOwn = A / own.L;
-      if (fOwn > cfg.natTail) {
-        var tk = (ratio - 1) / Math.max(1e-3, (cfg.natTailFull || 2) - 1); if (tk > 1) tk = 1;
-        var capT = sty.L * (cfg.natTail + (fOwn - cfg.natTail) * (1 - tk));
-        if (T > capT) { T = Math.max(A, capT); if (cfg._st) cfg._st.tailCut = (cfg._st.tailCut || 0) + 1; }
-      }
-    }
-    var out = [{ x: pts[0].x, y: pts[0].y, z: pts[0].z }], px = pts[0].x * ia, py = (pts[0].y - CY) * ib, pz = pts[0].z * ic, arc = 0, mo = [0, -1, 0], ms = [0, -1, 0];
+    var T = A * ratio, out = [{ x: pts[0].x, y: pts[0].y, z: pts[0].z }], px = pts[0].x * ia, py = (pts[0].y - CY) * ib, pz = pts[0].z * ic, arc = 0, mo = [0, -1, 0], ms = [0, -1, 0];
     var cMax = Math.cos(cfg.natResMax * Math.PI / 180), sMax = Math.sin(cfg.natResMax * Math.PI / 180), ux, uy, uz, c, qx, qy, qz, ql, kx, ky, kz, sn, cs2, kd, vx, vy, vz, step, pl, pt, pg;
     function put() {
       pl = Math.sqrt(px * px + py * py + pz * pz);
@@ -748,7 +735,7 @@
       if (state.fade && sp.fade) Object.assign(state.fade, sp.fade);
       try { if (typeof BRAID !== 'undefined') BRAID.on = false; } catch (e) {}
     } catch (e) { nat.err = '값 넣기 실패: ' + (e && e.message || e); console.warn(TAG + ' ' + nat.err, e); return false; }
-    nat.id = id; nat.base = G.base; nat.undo = undo; nat.shaped = 0; nat.kept = 0; nat.tailCut = 0; FS._st = nat; nat.err = null; nat.applied++; nat.at = new Date().toTimeString().slice(0, 8);
+    nat.id = id; nat.base = G.base; nat.undo = undo; nat.shaped = 0; nat.kept = 0; nat.err = null; nat.applied++; nat.at = new Date().toTimeString().slice(0, 8);
     refreshActive();
     redrawAll(sp.name || '스타일');
     needNatLine = true;
@@ -999,7 +986,7 @@
     var sp = null; try { sp = natSpec(); } catch (e) {}
     if (!sp) return TAG + ' 제 머리 바탕 — ' + (nat.pending ? '거는 중(다시 기르기를 기다림)' : (FS.native ? '걸린 스타일 없음' : '꺼짐(FLOW_SPEC.native=false)')) +
       (isCurlyPhoto() ? ' · 이 손님은 컬 ' + FS.nativeCurl + ' 이상이라 원본을 다시 기른 머리로 보여 줍니다' : '') + (nat.fellBack ? ' · 마네킹 방식으로 떨어진 횟수 ' + nat.fellBack : '') + (nat.err ? ' · ⚠ ' + nat.err : '');
-    return TAG + ' 제 머리 바탕으로 걸림 — "' + (sp.name || nat.id) + '"(' + nat.at + ') · 마네킹 안 켬 · 큰 흐름을 스타일 표로 바꾼 가닥 ' + nat.shaped + '개' + (nat.kept ? ' · 표가 없어 그대로 둔 가닥 ' + nat.kept : '') + (nat.tailCut ? ' · 혼자 길어서 스타일 길이로 누른 가닥 ' + nat.tailCut + '(FLOW_SPEC.natTail)' : '') +
+    return TAG + ' 제 머리 바탕으로 걸림 — "' + (sp.name || nat.id) + '"(' + nat.at + ') · 마네킹 안 켬 · 큰 흐름을 스타일 표로 바꾼 가닥 ' + nat.shaped + '개' + (nat.kept ? ' · 표가 없어 그대로 둔 가닥 ' + nat.kept : '') +
       ' · 가닥의 잔 차이는 이 손님 것 그대로(' + FS.natResMax + '°까지) · 길이는 스타일 ÷ 제 칸 배수' + (nat.err ? ' · ⚠ ' + nat.err : '') + ' — 끄기 FLOW_SPEC.native=false 후 스타일 다시 걸기';
   };
   FS.applyLine = function () {
