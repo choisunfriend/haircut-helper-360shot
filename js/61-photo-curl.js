@@ -68,6 +68,7 @@
     lockRootCm: 1.0,     // 뿌리에서 이만큼은 서서히(뿌리는 제자리)
     lockTaper: 0.45, lockTaperCm: 5,   // 끝으로 갈수록 타래가 모임: 뿌리 간격의 이 비율까지 · 이 길이에 걸쳐
     lockSmoothCm: 3,     // 길잡이의 길을 이 길이(cm)만큼 고르게 편 뒤 타래를 모음(가는 쪽만 펴고 두피에서 뜬 높이는 지킴) — 0이면 예전처럼 살짝만(두 번)
+    clumpSize: true, clumpRK: 1, clumpRMin: 0.6, clumpRMax: 1.6,   // (2026-10-10b) 조각마다 잰 크기로 컬 굵기 · 크기 보정 · 사진 전체 값의 이 배수 사이로
     lockClumps: true, lockClumpFr: [0.25, 0.4, 0.55, 0.7, 0.85], lockClumpVotes: 2,   // (2026-10-10m) 사진 타래 조각으로 묶기 · 가닥에서 비춰 볼 자리 · 같은 조각에 이만큼 걸려야
     lockDot: 0.5,        // 길잡이와 가는 쪽이 이만큼은 같아야 같은 타래(아니면 그 칸의 둘째 타래 · 그것도 아니면 그대로)
     radiusK: 1,          // 사진에서 잰 반경에 곱하는 보정(굵기가 사진과 다르면 이것으로)
@@ -177,7 +178,8 @@
       probe.cams.forEach(function (c) {
         var cl = G.clumpsFor(c.angle), mi = state.hairMasks && state.hairMasks[c.angle];
         if (!cl || !mi || !(c.s > 0)) return;
-        views.push({ c: c, cl: cl, kx: cl.W / (mi.w || cl.W), ky: cl.H / (mi.h || cl.H) });
+        var kx0 = cl.W / (mi.w || cl.W), cmU0 = (typeof modelCmPerUnit === 'function' ? modelCmPerUnit() : 0) || 19.33;
+        views.push({ c: c, cl: cl, kx: kx0, ky: cl.H / (mi.h || cl.H), cmPx: c.s * cmU0 / (kx0 || 1) });
       });
       if (views.length) CK = { env: env, views: views };
     } catch (e) { CK = null; }
@@ -207,8 +209,15 @@
     }
     return best >= PC.lockClumpVotes ? bk : 0;
   }
+  /* (2026-10-10b) 조각마다 컬 크기 — 조각 = 앞으로 드러난 반 바퀴(C·S자): 긴 축 길이(4σ) = 2.83 × 감기는 중심 반경 · 폭 = 타래 굵기 → 바깥 반경 = 길이 ÷ 2.83 + 폭 ÷ 2 (사진 조각 중앙값으로 약 1.2cm — 사진 전체 어림값과 비슷) */
+  function clumpRcm(key) {
+    if (!CK || !key) return 0;
+    var v = Math.floor(key / 40000) - 1, lb = key % 40000, V = CK.views[v]; if (!V || !V.cl.len || !(lb > 0)) return 0;
+    var r = (V.cl.len[lb] / 2.83 + V.cl.wid[lb] / 2) * V.cmPx * PC.clumpRK;   // 반원 점들의 긴 축 4σ = 2.83×중심 반경 · 바깥 반경 = 중심 반경 + 굵기 절반
+    return r > 0 ? r : 0;
+  }
   function buildLocks(model) {
-    prepClumps();
+    prepClumps(); var rOf = new Map(), rList = [];
     var t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now()), cu = cmU(), S0 = model.strands, n = S0.length, map = new Map(), cells = new Map(), i, s, p, k;
     var cmBy = {}, cmLo = Infinity, cmHi = 0, c;
     var A = 3 / cu, rootL = Math.max(1e-4, PC.lockRootCm / cu), tapL = Math.max(1e-4, PC.lockTaperCm / cu), recs = [];
@@ -217,7 +226,7 @@
       var a = arcs(p); if (!(a[p.length - 1] > 1e-4)) continue;
       var sc = s.sec == null ? '' : s.sec; if (!(sc in cmBy)) { cmBy[sc] = lockCmOf(sc); cmLo = Math.min(cmLo, cmBy[sc]); cmHi = Math.max(cmHi, cmBy[sc]); }
       c = cmBy[sc] / cu;
-      var ck = CK ? clumpKey(p) : 0; if (ck) nClump++;
+      var ck = CK ? clumpKey(p) : 0; if (ck) { nClump++; var rc = clumpRcm(ck); if (rc > 0) { rOf.set(s, rc); rList.push(rc); } }
       var r = { s: s, p: p, a: a, f: feat(p, a, A) }; k = ck ? 'c' + ck : sc + '|' + Math.floor(p[0].x / c) + ',' + Math.floor(p[0].y / c) + ',' + Math.floor(p[0].z / c);
       var g = cells.get(k); if (!g) { g = []; cells.set(k, g); } g.push(r);
     }
@@ -263,7 +272,9 @@
     }
     cells.forEach(function (g) { var rest = make(g); if (rest.length >= 2) make(rest); });
     if (!(cmHi > 0)) cmLo = cmHi = lockCmOf('');
-    lockMemo = { clumped: nClump, clumpViews: CK ? CK.views.length : 0, model: model, ver: lver, sig: lockSig(), map: map, n: n, locks: locks, moved: moved, cm: cmLo, cmHi: cmHi, per: moved / Math.max(1, locks), ms: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0 };
+    rList.sort(function (x, y) { return x - y; });
+    lockMemo = { rOf: rOf, rMed: rList.length ? rList[rList.length >> 1] : 0, rP25: rList.length ? rList[Math.floor(rList.length * 0.25)] : 0, rP75: rList.length ? rList[Math.floor(rList.length * 0.75)] : 0, clumped: nClump, clumpViews: CK ? CK.views.length : 0, model: model, ver: lver, sig: lockSig(), map: map, n: n, locks: locks, moved: moved, cm: cmLo, cmHi: cmHi, per: moved / Math.max(1, locks), ms: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0 };
+    try { if (nClump) console.log(TAG + ' 타래 뼈대 — 사진 타래 조각으로 묶은 가닥 ' + nClump + '/' + n + ' · 타래 ' + locks + '개 · 조각 크기 반경(25/50/75%) ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 사진 전체 반경 ' + (S.rCm > 0 ? (+S.rCm).toFixed(1) + 'cm' : '-')); } catch (e) {}
     return lockMemo;
   }
   function lockedPts(s) {
@@ -273,11 +284,11 @@
     return lockMemo.map.get(s) || null;
   }
   PC._locks = function () { return lockMemo; };
-  var innerAdj = W.adjustStrandGeom;
+  var innerAdj = W.adjustStrandGeom, curS = null;
   if (typeof innerAdj === 'function') W.adjustStrandGeom = function (s) {
     if (s && s.regrown && !s.mannequin && s.pts && PC.lock && lookActive()) {
       var lp = lockedPts(s);
-      if (lp) { var keepP = s.pts; s.pts = lp; try { return innerAdj.apply(this, arguments); } finally { s.pts = keepP; } }
+      if (lp) { var keepP = s.pts, keepC = curS; s.pts = lp; curS = s; try { return innerAdj.apply(this, arguments); } finally { s.pts = keepP; curS = keepC; } }
     }
     return innerAdj.apply(this, arguments);
   };
@@ -287,6 +298,12 @@
     W.curlStrand3D = function () {
       if (!lookActive()) return innerCurl.apply(this, arguments);
       var CB = CURL_BUNDLE, L = PC.look, sv = {}, k;
+      if (PC.clumpSize && curS && lockMemo.rOf && lockMemo.rOf.has(curS) && arguments.length >= 3 && S.rCm > 0) {   // 조각마다 잰 크기로 웨이브(컬 굵기)
+        var rg0 = S.rCm * PC.radiusK, rc0 = Math.max(rg0 * PC.clumpRMin, Math.min(rg0 * PC.clumpRMax, lockMemo.rOf.get(curS)));
+        var args = Array.prototype.slice.call(arguments); args[2] = PC.waveFor(rc0, args[1] || 75) / 100; S.sized = (S.sized || 0) + 1;
+        for (k in L) { sv[k] = CB[k]; CB[k] = L[k]; } S.calls++;
+        try { return innerCurl.apply(this, args); } finally { for (k in sv) CB[k] = sv[k]; }
+      }
       for (k in L) { sv[k] = CB[k]; CB[k] = L[k]; }
       S.calls++;
       try { return innerCurl.apply(this, arguments); } finally { for (k in sv) CB[k] = sv[k]; }
@@ -306,7 +323,7 @@
         (S.curl != null ? (S.rCm > 0 ? '사진 반경 ' + (+S.rCm).toFixed(1) + 'cm — ' : '') + (S.why || '안 맞춤') : '아직 안 잼'))) +
       ' · 뭉침 모양: ' + (!PC.clump ? '꺼짐' : (a ? '걸림(한 바퀴 간격 ' + PC.look.pitchThick + ' · 다발로 당김 ' + PC.look.clumpPull + ' · 감기는 자리 흩기 ' + PC.look.phaseJitter + ' · 잔떨림 ' + PC.look.microAmp + ')' :
         '안 걸림(다시 기른 머리 화면이 아니거나 사진 컬이 ' + PC.lookMinCurl + ' 미만)')) +
-      ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장) · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
+      ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
     return L;
   };
@@ -324,5 +341,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010a · 사진 타래 조각으로 묶기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010b · 사진 타래 조각으로 묶기 · 조각마다 크기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();

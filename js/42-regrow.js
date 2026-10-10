@@ -1314,7 +1314,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     for (y = 1; y < Hd - 1; y++) for (x = 1; x < Wd - 1; x++) { k = y * Wd + x; if (B[k] && B[k - 1] && B[k + 1] && B[k - Wd] && B[k + Wd]) E2[k] = 1; }
     for (i = 0; i < N; i++) B[i] = 0;
     for (y = 1; y < Hd - 1; y++) for (x = 1; x < Wd - 1; x++) { k = y * Wd + x; if (E2[k] || E2[k - 1] || E2[k + 1] || E2[k - Wd] || E2[k + Wd]) B[k] = 1; }
-    var lab = new Int16Array(N), n = 0, st = [], ws = [], sizes = [];
+    var lab = new Int16Array(N), n = 0, st = [], ws = [], sizes = [], CLEN = [0], CW = [0];
     for (i = 0; i < N; i++) {
       if (!B[i] || lab[i]) continue;
       if (n >= 32000) break;
@@ -1323,11 +1323,11 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
       if (comp.length < G.clumpMinPx) { comp.forEach(function (q2) { lab[q2] = -1; }); n--; continue; }
       var sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0; comp.forEach(function (q2) { var qx = q2 % Wd, qy = (q2 / Wd) | 0; sx += qx; sy += qy; sxx += qx * qx; syy += qy * qy; sxy += qx * qy; });
       var cn = comp.length, mx = sx / cn, my = sy / cn, a = sxx / cn - mx * mx, b2 = sxy / cn - mx * my, d = syy / cn - my * my, tr = a + d, det = a * d - b2 * b2, l2 = tr / 2 - Math.sqrt(Math.max(0, tr * tr / 4 - det));
-      ws.push(4 * Math.sqrt(Math.max(l2, 1e-6))); sizes.push(cn);
+      var l1 = tr - l2; ws.push(4 * Math.sqrt(Math.max(l2, 1e-6))); sizes.push(cn); CLEN[n] = 4 * Math.sqrt(Math.max(l1, 1e-6)); CW[n] = 4 * Math.sqrt(Math.max(l2, 1e-6));
     }
     for (i = 0; i < N; i++) if (lab[i] < 0) lab[i] = 0;
     ws.sort(function (p1, p2) { return p1 - p2; });
-    return { lab: lab, n: n, W: Wd, H: Hd, wMed: ws.length ? ws[ws.length >> 1] : 0 };
+    return { lab: lab, n: n, W: Wd, H: Hd, wMed: ws.length ? ws[ws.length >> 1] : 0, len: Float32Array.from(CLEN), wid: Float32Array.from(CW) };
   }
   G.clumpFindFn = clumpFind;
   var CLUMPS = new WeakMap();                                               // 사진 분석값(identity) → 조각 지도(저장소에 안 들어가게 따로 둠)
@@ -1609,5 +1609,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010p — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010q — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
