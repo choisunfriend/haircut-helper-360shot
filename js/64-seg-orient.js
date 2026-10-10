@@ -1,4 +1,4 @@
-/* 64-seg-orient.js — 머리 영역 다시 찾기 + 결 촘촘히 읽기 (2026-10-10a)
+/* 64-seg-orient.js — 머리 영역 다시 찾기 + 결 촘촘히 읽기 (2026-10-10b)
  *
  * ① 결 촘촘히 — 사용자: "그 예측 구간에서 튀는 게 생길 수도 있나?"
  *   지금(04번): 사진 세로줄마다 그 줄의 머리 픽셀 중 12곳만 결을 저장하고, 꺼낼 때 가장 가까운 줄 하나에서 위아래 두 점 사이를 직선으로 메움.
@@ -44,7 +44,7 @@
         }
         list._dense = step; cols[x] = list;
       }
-      S.dense++; S.samples += cnt;
+      S.dense++; S.samples += cnt; if (S.dense <= 4) console.log(TAG + ' 결 촘촘히 저장 — ' + Wd + '×' + Hd + ' · 점 ' + cnt + '개(' + step + 'px마다)');
       return cols;
     } catch (e) { S.err = '결 저장: ' + (e && e.message || e); return origBuild.apply(this, arguments); }
   };
@@ -88,6 +88,16 @@
     try { if (rgba && rgba.length === Wd * Hd * 4) last = { rgba: rgba, W: Wd, H: Hd, gray: g }; } catch (e) {}
     return g;
   };
+  // (2026-10-10b) 03b가 toGrayscale을 늘 부르는 건 아니어서(실측: 다시 찾기가 한 번도 안 걸림) — 캔버스에서 픽셀을 읽을 때도 기억
+  try {
+    var CR = W.CanvasRenderingContext2D && W.CanvasRenderingContext2D.prototype, origGID = CR && CR.getImageData;
+    if (origGID) CR.getImageData = function (sx, sy, sw, sh) {
+      var im = origGID.apply(this, arguments);
+      try { if (im && im.data && im.width * im.height * 4 === im.data.length && im.width >= 64 && im.height >= 64) lastGID = { rgba: im.data, W: im.width, H: im.height, gray: null }; } catch (e) {}
+      return im;
+    };
+  } catch (e) {}
+  var lastGID = null, noImg = 0;
   function feats(r, g, b) { return [0.299 * r + 0.587 * g + 0.114 * b, r - g, g - b]; }
   function stats(list) {
     var n = list.length / 3, m = [0, 0, 0], v = [0, 0, 0], i, j;
@@ -166,13 +176,15 @@
   var origKeep = W.keepLargestComponents;
   if (typeof origKeep === 'function') W.keepLargestComponents = function (M, Wd, Hd, frac) {
     var R = origKeep.apply(this, arguments);
-    if (!SO.regrow || frac !== 0.03 || !last || last.W !== Wd || last.H !== Hd) return R;
+    if (!SO.regrow || frac !== 0.03) return R;
+    var im = (last && last.W === Wd && last.H === Hd) ? last : (lastGID && lastGID.W === Wd && lastGID.H === Hd) ? lastGID : null;
+    if (!im) { noImg++; if (noImg <= 4) console.log(TAG + ' 머리 영역 다시 찾기 — 이 사진의 픽셀을 못 찾아 건너뜀(' + Wd + '×' + Hd + ')'); return R; }
     try {
-      var t0 = performance.now(), r = regrowMask(R, last);
+      var t0 = performance.now(), r = regrowMask(R, im);
       var info = { ms: Math.round(performance.now() - t0), added: r.added || 0, filled: r.filled || 0, before: r.before || 0, after: r.after || 0, model: r.model || null, note: r.note || '' };
       S.views.push(info); if (S.views.length > 8) S.views.shift();
       console.log(TAG + ' 머리 영역 다시 찾기 — ' + (r.note || ('경계 밖에서 넣은 픽셀 ' + info.added + ' · 안쪽 구멍 채움 ' + info.filled + ' · 영역 ' + info.before + ' → ' + info.after + 'px(+' + ((info.after / Math.max(1, info.before) - 1) * 100).toFixed(1) + '%) · 이 손님 머리색 밝기 ' + (r.model ? r.model.L + '±' + r.model.Ls + (r.model.gloss != null ? ' · 광택 ' + r.model.gloss : '') : '-') + ' · ' + info.ms + 'ms')));
-      last = null;
+      last = null; lastGID = null;
       if (r.M === R) return R;
       // 원래 배열 형식에 맞춰 돌려줌
       var out = new (R.constructor || Uint8Array)(R.length); for (var i = 0; i < R.length; i++) out[i] = r.M[i] ? (R[i] > 0 ? R[i] : 255) : 0;
@@ -180,9 +192,50 @@
     } catch (e) { S.err = '영역: ' + (e && e.message || e); console.warn(TAG + ' 영역 다시 찾기 실패', e); return R; }
   };
 
+  /* ---------------- ③ 뿌리 고르게 (2026-10-10b) ----------------
+   * 사용자: "roots 켜서 찍었는데 비는 곳들이 자꾸 나와. 듬성듬성하거나 대머리로 판정된 곳이 아니면 뿌리가 균일하게 채워져야 될 것 같아"
+   * 실측(남자분): 머리가 있는 칸 안에 밀도 0.15 미만 칸이 섬처럼 박혀 있음 — 옆머리 귀 위 세로 띠, 뒤 정수리 옆 덩어리, 맨 위.
+   *   사진의 광택·그림자를 "숱 없음"으로 센 자리(로그의 광택 보정이 다 못 되돌린 것)로 보임.
+   * 지금: 뿌리 밀도를 다 만든 직후(13b/13c의 fillUnseenRootCells 뒤) — 머리가 있는 칸(두피 밖 아님) 중 밀도가 보통(잰 칸의 중앙값)의 rootLow 미만인 칸을
+   *   이어진 덩어리로 묶어, 덩어리 넓이(실제 두피 넓이 — 정수리 꼭대기 칸은 작음)가 머리 넓이의 rootBaldArea 미만이면 보통의 rootFill배로 채움.
+   *   그보다 큰 덩어리이면서 거의 비어 있으면(평균 rootBaldDen 미만) 진짜 빈 자리(대머리·M자)로 보고 그대로 둠.
+   */
+  Object.assign(SO, Object.assign({ rootFix: true, rootLow: 0.6, rootFill: 0.95, rootBaldArea: 0.04, rootBaldDen: 0.12 }, W.SEG_ORIENT_ROOT || {}));
+  S.roots = [];
+  var origFill = W.fillUnseenRootCells;
+  if (typeof origFill === 'function') W.fillUnseenRootCells = function (ro) {
+    var r = origFill.apply(this, arguments);
+    if (!SO.rootFix) return r;
+    try {
+      var NT = ro.NT, NP = ro.NP, den = ro.den, est = ro.est, N = NT * NP, OFFv = typeof EST_OFFSCALP !== 'undefined' ? EST_OFFSCALP : 3, i;
+      if (!den || !est) return r;
+      var area = new Float64Array(N), meas = [], hairA = 0;
+      for (i = 0; i < N; i++) { var row = (i / NT) | 0; area[i] = Math.sin((row + 0.5) / NP * Math.PI); if (est[i] !== OFFv && den[i] >= 0) { hairA += area[i]; if (est[i] === 0) meas.push(den[i]); } }
+      if (meas.length < 20) return r;
+      meas.sort(function (a, b) { return a - b; });
+      var base = meas[meas.length >> 1], low = base * SO.rootLow, lab = new Int32Array(N), nl = 0, filled = 0, kept = 0, keptCells = 0;
+      for (i = 0; i < N; i++) {
+        if (lab[i] || est[i] === OFFv || !(den[i] < low)) continue;
+        nl++; var comp = [], st = [i]; lab[i] = nl;
+        while (st.length) {
+          var c = st.pop(); comp.push(c); var cr = (c / NT) | 0, cc = c % NT;
+          var nb = [cr > 0 ? c - NT : -1, cr < NP - 1 ? c + NT : -1, cr * NT + (cc + 1) % NT, cr * NT + (cc - 1 + NT) % NT];
+          for (var j = 0; j < 4; j++) { var q = nb[j]; if (q < 0 || lab[q] || est[q] === OFFv || !(den[q] < low)) continue; lab[q] = nl; st.push(q); }
+        }
+        var A = 0, dsum = 0; comp.forEach(function (c2) { A += area[c2]; dsum += den[c2] * area[c2]; });
+        if (A >= SO.rootBaldArea * hairA && dsum / Math.max(1e-9, A) < SO.rootBaldDen) { kept++; keptCells += comp.length; continue; }
+        comp.forEach(function (c2) { den[c2] = Math.max(den[c2], base * SO.rootFill); filled++; });
+      }
+      var info = { base: +base.toFixed(2), filled: filled, groups: nl, keptGroups: kept, keptCells: keptCells };
+      S.roots.push(info); if (S.roots.length > 4) S.roots.shift();
+      console.log(TAG + ' 뿌리 고르게 — 보통 밀도 ' + info.base + ' · 낮은 칸 덩어리 ' + nl + '개 중 채운 칸 ' + filled + ' · 넓고 비어 있어 그대로 둔 덩어리 ' + kept + '개(' + keptCells + '칸 — 대머리·M자로 봄) · 끄기 SEG_ORIENT.rootFix=false');
+    } catch (e) { S.err = '뿌리: ' + (e && e.message || e); }
+    return r;
+  };
+
   SO.lines = function () {
     var L = [TAG + ' 결 촘촘히 ' + (SO.dense ? '켜짐(' + SO.orientStepPx + 'px마다 · 옆 줄 섞기 ' + (SO.blendCols ? '켬' : '끔') + ' · 저장한 사진 ' + S.dense + '장 · 점 ' + S.samples + ')' : '꺼짐') +
-      ' · 영역 다시 찾기 ' + (SO.regrow ? '켜짐' : '꺼짐') + (S.err ? ' · ⚠ ' + S.err : '')];
+      ' · 영역 다시 찾기 ' + (SO.regrow ? '켜짐' : '꺼짐') + ' · 뿌리 고르게 ' + (SO.rootFix ? '켜짐' + (S.roots.length ? '(채운 칸 ' + S.roots[S.roots.length - 1].filled + ')' : '') : '꺼짐') + (S.err ? ' · ⚠ ' + S.err : '')];
     S.views.forEach(function (v, i) { L.push('  사진 ' + (i + 1) + ': ' + (v.note || ('+' + v.added + ' · 구멍 ' + v.filled + ' · ' + v.before + '→' + v.after + 'px · ' + v.ms + 'ms'))); });
     return L;
   };
