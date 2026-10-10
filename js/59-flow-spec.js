@@ -145,7 +145,6 @@
     nativeCurl: 40,      // 잰 컬이 이 값 이상이면 원본 = 다시 기른 머리(42번이 결 정렬을 끄는 기준과 같은 값) · 0 = 컬과 무관하게 마네킹+표
     natResMax: 75,       // 도: 가닥이 제 결에서 벗어나 있던 각을 이만큼까지만 인정(거꾸로 간 가닥은 이 각으로 눌림)
     natLenMin: 0.25, natLenMax: 4,   // 길이 배수(스타일 길이 ÷ 제 칸 길이)의 한도
-    saveComb: true,      // (h) 스타일 등록 때 빗질·넘기기(53번)를 건 가닥으로 표를 뽑음 — 넘긴 모양이 스타일에 들어감 · false = 빗기 전 모양으로(예전)
     natTail: 1.1, natTailFull: 2,    // (g) 늘릴 때: 제 칸보다 긴 가닥도 스타일 칸 길이의 natTail배까지만(배수 natTailFull 이상에서 온전히) · 0 = 안 누름
     nativeWaitMs: 25000, // 다시 기르기를 이만큼 기다려도 안 끝나면 마네킹 방식으로 겁니다
     guardNeck: true,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
@@ -674,57 +673,12 @@
     return f;
   };
 
-  /* (2026-10-07h) 빗질·넘기기를 표에 담기 — 사용자: "정리하고 나서 스타일로 저장한다면 넣는 게 맞다."
-     표는 "슬라이더를 타기 전의 가닥"에서 뽑습니다(슬라이더 값은 flowBase/flowLen으로 따로 실으므로). 그래서 그 가닥에 53번 빗질(combStrand3D — 화면이 쓰는 것과 같은 함수)을
-     걸어서 뽑습니다: 다시 기른 머리 화면 = 다시 기른 가닥 · 제 머리 바탕 스타일 = 스타일 결로 바꾼 가닥 · 마네킹+표 = 표대로 만든 마네킹 가닥.
-     빗질 획은 "화면에 그려진 자리"(슬라이더를 탄 뒤)에 칠해져 있어서, 슬라이더를 기준에서 많이 움직인 채(특히 넘김·볼륨) 빗었으면 자리가 조금 어긋날 수 있습니다.
-     획이 없거나 표를 못 만들면 null(예전 경로). */
-  function combN() { try { var C = W.COMB3D; if (!C || C.enabled === false) return 0; return (C.samples ? C.samples.length : 0) + (C.sweeps ? C.sweeps.length : 0); } catch (e) { return 0; } }
-  FS.fromCombed = function () {
-    ST.combed = null;
-    var nC = combN(); if (!FS.saveComb || !nC || typeof W.combStrand3D !== 'function') return null;
-    var t0 = now(), list = [], moved = 0, model = null, how = '';
-    function add(pts) {
-      if (!pts || pts.length < 2) return;
-      var o = pts; try { o = W.combStrand3D(pts) || pts; } catch (e) { o = pts; }
-      if (o !== pts) moved++;
-      list.push({ pts: o });
-    }
-    try {
-      if (mqOn()) {
-        var sp = activeSpec(); model = state.hair3Dneutral; if (!sp || !model || !model.strands) return null;
-        how = '표대로 만든 마네킹 가닥';
-        model.strands.forEach(function (s) {
-          if (!s || !s.mannequin || !s.pts) return;
-          if (!s._fsk) { try { W.adjustStrandGeom(s); } catch (e) {} }
-          if (s._fsk && s._fsk.pts) add(s._fsk.pts);
-        });
-      } else if (G && G.on && G.model && G.model.strands) {
-        model = G.model; var ns = natSpec(); how = ns ? '스타일 결로 바꾼 제 가닥' : '다시 기른 가닥';
-        model.strands.forEach(function (s) {
-          if (!s || !s.pts) return;
-          var pts = s.pts;
-          if (ns) { if (!s._fnat) { try { W.adjustStrandGeom(s); } catch (e) {} } if (s._fnat && s._fnat.pts) pts = s._fnat.pts; }
-          add(pts);
-        });
-      } else return null;
-      if (!list.length || !moved) { ST.combed = { n: nC, strands: list.length, moved: 0, how: how, skipped: true }; return null; }
-      var env = scalpEnv(model); if (!env) return null;
-      var tb = buildTable(list, env.E, env.CY, FS), f = encode(tb);
-      if (!f || !(f.n > 0)) return null;
-      ST.combed = { n: nC, strands: list.length, moved: moved, how: how, ms: now() - t0, nb: tb.nb, bytes: f.d.length, at: new Date().toTimeString().slice(0, 8) };
-      console.log(TAG + ' 스타일 등록 — 빗질·넘기기를 표에 담았습니다: ' + how + ' ' + list.length + '개에 빗질(획 표본 ' + nC + '개)을 걸어 표를 다시 뽑음 · 빗질로 바뀐 가닥 ' + moved + '개 · ' + Math.round(ST.combed.ms) + 'ms — 끄기 FLOW_SPEC.saveComb=false');
-      return f;
-    } catch (e) { console.warn(TAG + ' 빗질을 표에 담기 실패 — 빗기 전 모양으로 싣습니다', e); ST.combed = { err: String(e && e.message || e) }; return null; }
-  };
-
   /* 잰 결과(r)에 표를 실음 — r.spec을 그 자리에서 고침. tipAt/lenCm은 지우지 않습니다(끄면 예전 동작 · 걸 때만 가림) */
   FS.enrich = function (r) {
     if (!FS.save || !r || !r.spec) return r;
     var f = null;
     try { f = FS.fromRegrown(); } catch (e) { ST.err = '표 만들기 실패: ' + (e && e.message || e); console.warn(TAG + ' ' + ST.err, e); }
     if (!f || !(f.n > 0)) { ST.err = '표가 비었습니다(다시 기른 가닥에서 칸을 하나도 못 만듦) — 숫자만 넘깁니다'; console.warn(TAG + ' ' + ST.err); return r; }
-    if (regCtx) { try { var fcE = FS.fromCombed(); if (fcE) f = fcE; } catch (e) {} }      // (h) 사용자가 등록을 누른 경우에만(58번의 자동 원본 올리기에는 안 넣음)
     var sp = r.spec, sty = sp.styling || {}, perm = sp.perm || {}, len = {};
     secOrder().forEach(function (sec) { try { len[sec] = SECTIONS[sec].defaults.length; } catch (e) { len[sec] = 50; } });
     sp.flow = f;
@@ -1018,10 +972,9 @@
       }
       if (spec && sp && FS.save) {
         if (sp.base === 'regrown') spec.base = 'regrown';
-        var fcB = null; try { fcB = FS.fromCombed(); } catch (e) { fcB = null; }             // (h) 빗질·넘기기가 있으면 그걸 건 가닥으로 다시 뽑은 표
-        spec.flow = fcB || sp.flow; spec.flowBase = JSON.parse(JSON.stringify(sp.flowBase || {})); spec.flowLen = {};
+        spec.flow = sp.flow; spec.flowBase = JSON.parse(JSON.stringify(sp.flowBase || {})); spec.flowLen = {};
         secOrder().forEach(function (sec) { var c = state.sections && state.sections[sec]; if (c && typeof c.length === 'number') spec.flowLen[sec] = c.length; });
-        console.log(TAG + ' 스타일 등록 — ' + (fcB ? '빗질·넘기기를 담은 표' : '지금 걸린 표') + '를 같이 실었습니다(' + Math.round(spec.flow.d.length / 1024) + 'KB · 섹션 길이 슬라이더 ' + secOrder().map(function (k) { return k + ' ' + spec.flowLen[k]; }).join(' · ') + ')');
+        console.log(TAG + ' 스타일 등록 — 지금 걸린 표를 같이 실었습니다(' + Math.round(sp.flow.d.length / 1024) + 'KB · 섹션 길이 슬라이더 ' + secOrder().map(function (k) { return k + ' ' + spec.flowLen[k]; }).join(' · ') + ')');
       }
     } catch (e) { console.warn(TAG + ' 등록에 표 싣기 실패', e); }
     return spec;
