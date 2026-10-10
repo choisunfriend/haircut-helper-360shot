@@ -68,6 +68,7 @@
     lockRootCm: 1.0,     // 뿌리에서 이만큼은 서서히(뿌리는 제자리)
     lockTaper: 0.45, lockTaperCm: 5,   // 끝으로 갈수록 타래가 모임: 뿌리 간격의 이 비율까지 · 이 길이에 걸쳐
     lockSmoothCm: 3,     // 길잡이의 길을 이 길이(cm)만큼 고르게 편 뒤 타래를 모음(가는 쪽만 펴고 두피에서 뜬 높이는 지킴) — 0이면 예전처럼 살짝만(두 번)
+    lockClumps: true, lockClumpFr: [0.25, 0.4, 0.55, 0.7, 0.85], lockClumpVotes: 2,   // (2026-10-10m) 사진 타래 조각으로 묶기 · 가닥에서 비춰 볼 자리 · 같은 조각에 이만큼 걸려야
     lockDot: 0.5,        // 길잡이와 가는 쪽이 이만큼은 같아야 같은 타래(아니면 그 칸의 둘째 타래 · 그것도 아니면 그대로)
     radiusK: 1,          // 사진에서 잰 반경에 곱하는 보정(굵기가 사진과 다르면 이것으로)
     waveMin: 30, waveMax: 90,
@@ -163,7 +164,51 @@
     try { if (PC.lockBase && state.sections) Object.keys(state.sections).sort().forEach(function (k) { a.push(k + '=' + (+baseOf(k)).toFixed(3)); }); } catch (e) {}
     return a.join(',');
   }
+  /* (2026-10-10m) 사진의 타래 조각으로 묶기 — 42번이 곱슬 사진에서 찾은 조각(밝은 겉면, 앞으로 드러난 반 바퀴) 위를 지나는 가닥끼리 한 타래.
+     가닥의 가운데 몇 점을 사진마다 비춰 보고(가려진 자리는 뺌) 가장 많이 걸린 (사진, 조각)을 그 가닥의 타래로. 못 찾으면 예전처럼 뿌리 칸. */
+  var CK = null, nClump = 0;
+  function prepClumps() {
+    CK = null; nClump = 0;
+    if (!PC.lockClumps || !G || typeof G.clumpsFor !== 'function') return;
+    try {
+      var photo = state._hair3Dneutral, probe = (photo && photo.occ && photo.occ.probe) || (state.hairOcc3D && state.hairOcc3D.probe), E = getScalpEllipsoid();
+      if (!probe || !probe.cams || !photo || !isFinite(photo.yTop)) return;
+      var env = { CY: photo.CY, yTop: photo.yTop, a2: E.a * E.a, b2: E.b * E.b, c2: E.c * E.c, yBody: photo.CY - 0.7 * E.b }, views = [];
+      probe.cams.forEach(function (c) {
+        var cl = G.clumpsFor(c.angle), mi = state.hairMasks && state.hairMasks[c.angle];
+        if (!cl || !mi || !(c.s > 0)) return;
+        views.push({ c: c, cl: cl, kx: cl.W / (mi.w || cl.W), ky: cl.H / (mi.h || cl.H) });
+      });
+      if (views.length) CK = { env: env, views: views };
+    } catch (e) { CK = null; }
+  }
+  var pj = [0, 0];
+  function projectP(c, env, p) {                   // 60번과 같은 식(사진 카메라 · 두상 뒤로 가려지면 0)
+    var R = c.R, x = p.x, y = p.y - env.CY, z = p.z;
+    pj[0] = (R[0] * x + R[1] * y + R[2] * z) / c.s + c.cx;
+    pj[1] = c.crownY + (env.yTop - ((R[3] * x + R[4] * y + R[5] * z) + env.CY)) / c.sy;
+    if (R[6] * x + R[7] * y + R[8] * z < 0) {
+      if (p.y < env.yBody) return 0;
+      var dx = R[6], dy = R[7], dz = R[8], A = dx * dx / env.a2 + dy * dy / env.b2 + dz * dz / env.c2, B = 2 * (x * dx / env.a2 + y * dy / env.b2 + z * dz / env.c2), C = x * x / env.a2 + y * y / env.b2 + z * z / env.c2 - 0.96, D = B * B - 4 * A * C;
+      if (D > 0 && (-B + Math.sqrt(D)) / (2 * A) > 1e-4) return 0;
+    }
+    return 1;
+  }
+  function clumpKey(p) {
+    var votes = {}, best = 0, bk = 0, fr = PC.lockClumpFr, i, v;
+    for (i = 0; i < fr.length; i++) {
+      var q = p[Math.min(p.length - 1, Math.round(fr[i] * (p.length - 1)))];
+      for (v = 0; v < CK.views.length; v++) {
+        var V = CK.views[v]; if (!projectP(V.c, CK.env, q)) continue;
+        var lx = Math.floor(pj[0] * V.kx), ly = Math.floor(pj[1] * V.ky); if (lx < 0 || ly < 0 || lx >= V.cl.W || ly >= V.cl.H) continue;
+        var lb = V.cl.lab[ly * V.cl.W + lx]; if (!(lb > 0)) continue;
+        var key = (v + 1) * 40000 + lb; votes[key] = (votes[key] || 0) + 1; if (votes[key] > best) { best = votes[key]; bk = key; }
+      }
+    }
+    return best >= PC.lockClumpVotes ? bk : 0;
+  }
   function buildLocks(model) {
+    prepClumps();
     var t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now()), cu = cmU(), S0 = model.strands, n = S0.length, map = new Map(), cells = new Map(), i, s, p, k;
     var cmBy = {}, cmLo = Infinity, cmHi = 0, c;
     var A = 3 / cu, rootL = Math.max(1e-4, PC.lockRootCm / cu), tapL = Math.max(1e-4, PC.lockTaperCm / cu), recs = [];
@@ -172,7 +217,8 @@
       var a = arcs(p); if (!(a[p.length - 1] > 1e-4)) continue;
       var sc = s.sec == null ? '' : s.sec; if (!(sc in cmBy)) { cmBy[sc] = lockCmOf(sc); cmLo = Math.min(cmLo, cmBy[sc]); cmHi = Math.max(cmHi, cmBy[sc]); }
       c = cmBy[sc] / cu;
-      var r = { s: s, p: p, a: a, f: feat(p, a, A) }; k = sc + '|' + Math.floor(p[0].x / c) + ',' + Math.floor(p[0].y / c) + ',' + Math.floor(p[0].z / c);
+      var ck = CK ? clumpKey(p) : 0; if (ck) nClump++;
+      var r = { s: s, p: p, a: a, f: feat(p, a, A) }; k = ck ? 'c' + ck : sc + '|' + Math.floor(p[0].x / c) + ',' + Math.floor(p[0].y / c) + ',' + Math.floor(p[0].z / c);
       var g = cells.get(k); if (!g) { g = []; cells.set(k, g); } g.push(r);
     }
     var locks = 0, moved = 0, o = { x: 0, y: 0, z: 0 }, EL = null, ECY = 0;
@@ -217,7 +263,7 @@
     }
     cells.forEach(function (g) { var rest = make(g); if (rest.length >= 2) make(rest); });
     if (!(cmHi > 0)) cmLo = cmHi = lockCmOf('');
-    lockMemo = { model: model, ver: lver, sig: lockSig(), map: map, n: n, locks: locks, moved: moved, cm: cmLo, cmHi: cmHi, per: moved / Math.max(1, locks), ms: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0 };
+    lockMemo = { clumped: nClump, clumpViews: CK ? CK.views.length : 0, model: model, ver: lver, sig: lockSig(), map: map, n: n, locks: locks, moved: moved, cm: cmLo, cmHi: cmHi, per: moved / Math.max(1, locks), ms: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0 };
     return lockMemo;
   }
   function lockedPts(s) {
@@ -260,7 +306,7 @@
         (S.curl != null ? (S.rCm > 0 ? '사진 반경 ' + (+S.rCm).toFixed(1) + 'cm — ' : '') + (S.why || '안 맞춤') : '아직 안 잼'))) +
       ' · 뭉침 모양: ' + (!PC.clump ? '꺼짐' : (a ? '걸림(한 바퀴 간격 ' + PC.look.pitchThick + ' · 다발로 당김 ' + PC.look.clumpPull + ' · 감기는 자리 흩기 ' + PC.look.phaseJitter + ' · 잔떨림 ' + PC.look.microAmp + ')' :
         '안 걸림(다시 기른 머리 화면이 아니거나 사진 컬이 ' + PC.lookMinCurl + ' 미만)')) +
-      ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
+      ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장) · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
     return L;
   };
@@ -278,5 +324,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261008d). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010a · 사진 타래 조각으로 묶기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();

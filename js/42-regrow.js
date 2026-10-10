@@ -166,7 +166,10 @@
     curlKeepShape: true,        // 잰 컬에서 겉모양이 사진과 같도록 편 길이를 미리 늘려 잡음
     // (2026-10-04i) 컬 굵기 — 머리말 v5 참고
     curlRadius: false,          // (2026-10-06r) 끔 — 켜면 컬이 죽음(웨이브 100 + 로드 ×1.29 = 곧은 막대). q에서 다시 켠 것은 잘못 읽은 것 — 머리말 v8 참고
-    curlHelix: true, helixPeak: 0.3, helixBetaLo: 25, helixBetaHi: 78,   // (2026-10-10k) 나선 측정으로 컬 반경·한 바퀴 간격을 잼(쓸 조건: 반복 세기 · 가닥 기울기 범위) · false = 예전 어림식
+    clumps: true, clumpWin: 17, clumpLift: 1.5, clumpMinPx: 25,   // (2026-10-10m) 곱슬 사진에서 타래 조각 찾기(61번이 3D 가닥을 조각대로 묶음)
+    fadeOn: true,       // (2026-10-10l) 페이드를 잰 손님은 페이드 토글을 켜서 시작
+    curlHelix: true,    // (2026-10-10m) 다시 켬(사용자: 타래 구현까지 한 다음에 판단) · 예전 메모: 실제 곱슬 사진(타래가 여러 방향으로 감김)에서 사진마다 0.6~1.1cm로 들쭉날쭉·정면은 못 잼 → 사진 전체 한 번이 아니라 부분마다 재는 방식으로 다시 만들 때까지 예전 어림식
+    curlHelix_was: true, helixPeak: 0.3, helixBetaLo: 25, helixBetaHi: 78,   // (2026-10-10k) 나선 측정으로 컬 반경·한 바퀴 간격을 잼(쓸 조건: 반복 세기 · 가닥 기울기 범위) · false = 예전 어림식
     curlAmp: false, curlAmpK: 1.15, curlAmpWavy: 0.25,   // (2026-10-10j) 끔 — 실제 곱슬 사진에서 0.4cm로 작게 잼(큰 컬은 선이 타래 경계에서 끊겨 빠지고 잔물결만 남음) → 뽀글이. 고칠 때까지 예전 어림식   // (2026-10-10h) 컬 반경을 결 선의 흔들림 폭으로 직접 잼(합성 컬 진폭 3~25px에서 실제의 74~96% → ×1.15) · 흔들리는 선이 이 비율 이상일 때만 · false = 예전 어림식
     curlRk: 5, curlR0: 3.3,     // 컬 반경(px) = curlRk × (dHalf − curlR0)  (⚠ 합성 타래 무늬로 맞춘 어림)
     curlRminPx: 5,              // 이보다 작게는 구분 못 함(결 방향장의 창 크기)
@@ -871,7 +874,14 @@
       var sbv = {}; (typeof ANGLES !== 'undefined' ? ANGLES : ['front', 'left', 'right', 'back']).forEach(function (a) { sbv[a] = Object.assign({}, sty); });
       state.stylingByView = sbv;
       try { if (typeof bindStylingToCurrentView === 'function') bindStylingToCurrentView(); } catch (e) {}
-      try { if (state.fade) state.fade.enabled = false; } catch (e) {}      // 페이드는 이미 머리에 들어 있음
+      // (2026-10-10l) 사용자: "페이드가 켜지면서 먹도록 해야 될 것 같아. 토글이 켜져야 페이드 조정이 되거든" — 사진에서 페이드를 잰 손님은 토글을 켜고 잰 높이·가드·테이퍼를 넣음(이어서 조정 가능) · 아니면 예전처럼 끔
+      try {
+        var fd = r && r.spec && r.spec.fade;
+        if (state.fade) {
+          if (G.fadeOn && fd && fd.enabled) { Object.assign(state.fade, { enabled: true, height: fd.height, guard: fd.guard, taper: fd.taper, blendWidth: fd.blendWidth }); base.fade = { height: fd.height }; }
+          else state.fade.enabled = false;
+        }
+      } catch (e) {}
       try { state.specAppliedId = null; state._specUndo = null; if (typeof BRAID !== 'undefined') BRAID.on = false; } catch (e) {}
     } catch (e) { console.warn(TAG + ' 기준 값 넣기 실패', e); }
     G.base = base;
@@ -1279,6 +1289,49 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
 
 
   G.helixMeasureFn = helixMeasure;
+
+  /* (2026-10-10m) 타래 조각 찾기 — 곱슬 사진에서 타래는 밝은 겉면과 그 사이 어두운 틈으로 갈림.
+     머리 영역 안에서 둘레(17px)보다 밝은 부분을 이어진 조각으로 묶음 → 조각 하나 = 앞으로 드러난 타래의 반 바퀴(C·S자).
+     실측(곱슬 여자분 사진 4장): 조각 57~95개 · 폭 중앙값 7~9px(≈1cm). 61번이 이 조각으로 3D 가닥을 한 타래로 묶음. */
+  function clumpFind(px, mask, Wd, Hd) {
+    var N = Wd * Hd, L = new Float32Array(N), T = new Float32Array(N), i, x, y, k;
+    for (i = 0; i < N; i++) L[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+    for (var pass = 0; pass < 2; pass++) {                                   // [1 2 1] 두 번 = 살짝 흐림
+      for (y = 0; y < Hd; y++) for (x = 0; x < Wd; x++) { k = y * Wd + x; T[k] = (L[k] * 2 + L[x > 0 ? k - 1 : k] + L[x < Wd - 1 ? k + 1 : k]) / 4; }
+      for (y = 0; y < Hd; y++) for (x = 0; x < Wd; x++) { k = y * Wd + x; L[k] = (T[k] * 2 + T[y > 0 ? k - Wd : k] + T[y < Hd - 1 ? k + Wd : k]) / 4; }
+    }
+    var I = new Float64Array((Wd + 1) * (Hd + 1)), r = G.clumpWin >> 1;   // 적분 영상 → 둘레 평균
+    for (y = 0; y < Hd; y++) { var row = 0; for (x = 0; x < Wd; x++) { row += L[y * Wd + x]; I[(y + 1) * (Wd + 1) + x + 1] = I[y * (Wd + 1) + x + 1] + row; } }
+    var B = new Uint8Array(N);
+    for (y = 0; y < Hd; y++) for (x = 0; x < Wd; x++) {
+      k = y * Wd + x; if (!mask[k]) continue;
+      var x0 = Math.max(0, x - r), x1 = Math.min(Wd, x + r + 1), y0 = Math.max(0, y - r), y1 = Math.min(Hd, y + r + 1);
+      var m = (I[y1 * (Wd + 1) + x1] - I[y0 * (Wd + 1) + x1] - I[y1 * (Wd + 1) + x0] + I[y0 * (Wd + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      if (L[k] > m + G.clumpLift) B[k] = 1;
+    }
+    var E2 = new Uint8Array(N);                                              // 열기(깎고 다시 키움) — 실오라기 연결 끊기
+    for (y = 1; y < Hd - 1; y++) for (x = 1; x < Wd - 1; x++) { k = y * Wd + x; if (B[k] && B[k - 1] && B[k + 1] && B[k - Wd] && B[k + Wd]) E2[k] = 1; }
+    for (i = 0; i < N; i++) B[i] = 0;
+    for (y = 1; y < Hd - 1; y++) for (x = 1; x < Wd - 1; x++) { k = y * Wd + x; if (E2[k] || E2[k - 1] || E2[k + 1] || E2[k - Wd] || E2[k + Wd]) B[k] = 1; }
+    var lab = new Int16Array(N), n = 0, st = [], ws = [], sizes = [];
+    for (i = 0; i < N; i++) {
+      if (!B[i] || lab[i]) continue;
+      if (n >= 32000) break;
+      n++; var comp = [i]; lab[i] = n; st.length = 0; st.push(i);
+      while (st.length) { var c = st.pop(), cx = c % Wd; var nb = [cx > 0 ? c - 1 : -1, cx < Wd - 1 ? c + 1 : -1, c - Wd, c + Wd]; for (var j = 0; j < 4; j++) { var q = nb[j]; if (q < 0 || q >= N || !B[q] || lab[q]) continue; lab[q] = n; st.push(q); comp.push(q); } }
+      if (comp.length < G.clumpMinPx) { comp.forEach(function (q2) { lab[q2] = -1; }); n--; continue; }
+      var sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0; comp.forEach(function (q2) { var qx = q2 % Wd, qy = (q2 / Wd) | 0; sx += qx; sy += qy; sxx += qx * qx; syy += qy * qy; sxy += qx * qy; });
+      var cn = comp.length, mx = sx / cn, my = sy / cn, a = sxx / cn - mx * mx, b2 = sxy / cn - mx * my, d = syy / cn - my * my, tr = a + d, det = a * d - b2 * b2, l2 = tr / 2 - Math.sqrt(Math.max(0, tr * tr / 4 - det));
+      ws.push(4 * Math.sqrt(Math.max(l2, 1e-6))); sizes.push(cn);
+    }
+    for (i = 0; i < N; i++) if (lab[i] < 0) lab[i] = 0;
+    ws.sort(function (p1, p2) { return p1 - p2; });
+    return { lab: lab, n: n, W: Wd, H: Hd, wMed: ws.length ? ws[ws.length >> 1] : 0 };
+  }
+  G.clumpFindFn = clumpFind;
+  var CLUMPS = new WeakMap();                                               // 사진 분석값(identity) → 조각 지도(저장소에 안 들어가게 따로 둠)
+  G.clumpsFor = function (angle) { try { var mi = state.hairMasks && state.hairMasks[angle], id = mi && mi.identity; return id ? (CLUMPS.get(id) || null) : null; } catch (e) { return null; } };
+
   (function () {
     var pend = null;
     var oEx = W.extractHairMask;
@@ -1288,6 +1341,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
       pend = null;
       var f = oF.apply(this, arguments);
       try { if (f && f.angle && f.coherence) { var cs = curvStats(f.angle, f.coherence, mask, Wd, Hd); if (cs) { pend = { w: Wd, h: Hd, cs: cs }; if (G.curlAmp) { try { pend.amp = curlAmp(f.angle, f.coherence, mask, Wd, Hd); } catch (e2) {} }
+            if (G.clumps && px && px.length === Wd * Hd * 4) { try { pend.clumps = clumpFind(px, mask, Wd, Hd); } catch (e4) {} }
             if (G.curlHelix && px && px.length === Wd * Hd * 4) { try { pend.helix = helixMeasure(px, mask, Wd, Hd, f.angle, f.coherence, { n: Math.min(Wd, Hd) >= 300 ? 256 : 128 }); } catch (e3) {} } } } } catch (e) { pend = null; }
       return f;
     };
@@ -1296,6 +1350,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
       var id = oM.apply(this, arguments);
       try {
         if (id && pend && a && pend.w === a.w && pend.h === a.h) { id.curlDHalf = pend.cs.dHalf; id.curlFlat = pend.cs.flat; id.curlC1 = pend.cs.c1; id.curlRn = pend.cs.n; if (pend.helix) { id.curlHelix = pend.helix; }
+        if (pend.clumps) { CLUMPS.set(id, pend.clumps); id.curlClumpN = pend.clumps.n; id.curlClumpW = pend.clumps.wMed; try { console.log(TAG + ' 타래 조각 — ' + pend.clumps.n + '개 · 폭 중앙값 ' + pend.clumps.wMed.toFixed(1) + 'px(' + pend.clumps.W + '×' + pend.clumps.H + ')'); } catch (e5) {} }
         if (pend.amp) { id.curlAmpPx = pend.amp.ampPx; id.curlLamPx = pend.amp.lamPx; id.curlWavy = pend.amp.wavy; id.curlAmpN = pend.amp.n; } }
       } catch (e) {}
       pend = null;
@@ -1542,5 +1597,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010k — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261010n — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
