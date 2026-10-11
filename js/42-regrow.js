@@ -181,7 +181,7 @@
     tapPx: 4,           // 머리 영역 판정 여유(800px 기준)
     gravity: 0.25,      // 두피 밖 구간에서 중력을 섞는 비율
     // (2026-10-04e) 뒷머리가 앞으로 쏠리는 것 막기 — 아래 backFix 설명 참고
-    backFix: false,     // (2026-10-11f) 끔 — 두피 밖 3D 방향(tri3D)과 3D 머리 덩어리가 대신함(뒷머리 앞쏠림 막기)
+    backFix: true,      // (2026-10-11j) 다시 켬(사용자 선택 (가)) — 끄니 뒷머리가 몸통을 뚫고 앞으로 넘어옴(뒤 뿌리 → 몸 앞 1,278가닥). 몸통이 없는 동안은 이것이 뒷머리를 뒤에 둠
     freeDepth: 0.6,     // 두피 밖 구간에서 사진 결이 지어낼 수 있는 깊이(카메라 쪽/반대쪽) 움직임 상한(가로·세로 움직임의 몇 배)
     backFrom: 0.1, backFull: 0.5,   // 두피를 벗어난 자리가 얼마나 뒤쪽인가(0 = 귀 옆 · 1 = 정뒤) — 이 구간에서 0→1로 막음
     // (2026-10-05k) 긴 머리는 목 아래에서 곧게 늘어뜨림 — 머리말 v6 참고
@@ -1633,6 +1633,19 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
       var a = by[sec] || []; if (a.length < 8) return;
       raw[sec] = { n: a.length, growCm: q(a.map(function (s) { return s.rg.L * cm; }), 0.5), thickCm: q(a.map(function (s) { return s.rg.t * cm; }), 0.5),
         freePct: Math.round(a.filter(function (s) { return s.rg.free; }).length / a.length * 100) };
+      // ④ 부피 재기 — 이 섹션 두께(머리 표면에서 뜬 정도), 끝쪽 퍼짐, 처짐
+      try {
+        var flare = [], drop = [];
+        a.forEach(function (s) {
+          var P = s.pts, n = P.length; if (n < 4) return;
+          var mid = P[n >> 1], tip = P[n - 1], r0 = P[0];
+          var rM = Math.sqrt(mid.x * mid.x + mid.z * mid.z), rT = Math.sqrt(tip.x * tip.x + tip.z * tip.z);
+          flare.push((rT - rM) * cm);
+          var L = s.rg.L || 1; drop.push(clampN((r0.y - tip.y) / L, -1, 1));
+        });
+        raw[sec].flareCm = flare.length ? +q(flare, 0.5).toFixed(2) : 0;
+        raw[sec].drop = drop.length ? +q(drop, 0.5).toFixed(2) : 0;
+      } catch (e) {}
       if (info.isLong) {
         if (hr) tipAt[sec] = +((hr.yTop - q(a.map(function (s) { return s.rg.tipY; }), 0.5)) / hr.H).toFixed(3);
       } else {
@@ -1645,6 +1658,20 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     var top = (by.crown || []).concat(by.front || []);
     var tTop = top.length ? q(top.map(function (s) { return s.rg.t * cm; }), 0.5) : 1.5;
     var volume = Math.round(clampN(35 + 10 * tTop, 20, 95));
+    // ④ 섹션 부피 → volShare/volPoint/weight (SB.map 거꾸로 — 전체 volume이 윗머리 두께를 맡고, 섹션은 그 비율만)
+    var K0 = { crown: 1, front: .85, temple: .7, side: .75, occipital: .85, nape: .5 };
+    try { var vk = (CFG.VOLUME3D() || {}).secK; if (vk) K0 = vk; } catch (e) {}
+    var kTop = ((K0.crown || 1) + (K0.front || 1)) / 2, volRaw = {};
+    order.forEach(function (sec) {
+      var R = raw[sec]; if (!R || !(tTop > 0)) return;
+      var share = 50 * (R.thickCm / tTop) * kTop / (K0[sec] || 1);
+      var point = 50 + 25 * (R.flareCm || 0);                 // 끝이 1cm 더 벌어지면 +25
+      var weight = 50 + 50 * ((R.drop || 0) - 0.6) / 0.4;     // 끝이 곧게 처질수록 무거움
+      volRaw[sec] = { volShare: Math.round(share), volPoint: Math.round(point), weight: Math.round(weight) };
+      cut[sec].volShare = Math.round(clampN(share, 0, 100));
+      cut[sec].volPoint = Math.round(clampN(point, 0, 100));
+      cut[sec].weight = Math.round(clampN(weight, 0, 100));
+    });
     var swSum = 0; top.forEach(function (s) { swSum += -s.rg.dz; });
     var sweep = top.length ? Math.round(clampN(100 * swSum / top.length, -100, 100)) : 0;
     var part = { x: 0, score: 0, lateral: 0 };
@@ -1681,7 +1708,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     var pc = { value: 0, deg: null, views: [] }; try { pc = G.photoCurl(); } catch (e) {}
     var spec = { name: '', cut: cut, perm: { curl: pc.value, wave: pc.wave != null ? pc.wave : 50, rCm: pc.rCm > 0 ? +pc.rCm : null, pitchCm: (function () { try { var ps = (pc.rViews || []).filter(function (v) { return v.pitchCm > 0; }).map(function (v) { return v.pitchCm; }).sort(function (x, y) { return x - y; }); return ps.length ? (ps.length % 2 ? ps[ps.length >> 1] : (ps[ps.length / 2 - 1] + ps[ps.length / 2]) / 2) : (pc.pitchCm > 0 ? pc.pitchCm : null); } catch (e) { return null; } })() }, styling: styling, globalCurl: pc.value, fade: fade, lenFallback: lenFallback, version: 1, source: 'regrow' };
     if (info.isLong) spec.tipAt = tipAt; else spec.lenCm = lenCm;
-    return { spec: spec, isLong: info.isLong, raw: raw, tTopCm: tTop, part: part, bareShare: bareShare, order: order, curl: pc };
+    return { spec: spec, isLong: info.isLong, raw: raw, volRaw: volRaw, tTopCm: tTop, part: part, bareShare: bareShare, order: order, curl: pc };
   };
   G.measureLines = function (r) {
     r = r || G.measure();
@@ -1694,6 +1721,9 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     }
     L.push('  참고 — 섹션별 [기른 길이 cm / 뿌리 자리 두께 cm / 두피 밖으로 늘어진 가닥 %]: ' + r.order.filter(function (k) { return r.raw[k]; }).map(function (k) {
       return k + ' ' + n1(r.raw[k].growCm) + '/' + n1(r.raw[k].thickCm) + '/' + r.raw[k].freePct + '%'; }).join(' · '));
+    if (r.volRaw) L.push('  섹션 부피 [volShare/volPoint/weight] (괄호 = 막대 0~100 밖이라 잘린 원래 값): ' + r.order.filter(function (k) { return r.volRaw[k]; }).map(function (k) {
+      var c = sp.cut[k], v = r.volRaw[k], f = function (key) { return c[key] + (c[key] !== v[key] ? '(' + v[key] + ')' : ''); };
+      return k + ' ' + f('volShare') + '/' + f('volPoint') + '/' + f('weight') + ' ←두께 ' + n1(r.raw[k].thickCm) + 'cm·끝퍼짐 ' + r.raw[k].flareCm + 'cm·처짐 ' + r.raw[k].drop; }).join(' · '));
     L.push('  페이드: ' + (sp.fade.enabled ? '켜짐 · 높이 ' + sp.fade.height + '% · 가드 ' + sp.fade.guard + ' · 테이퍼 ' + sp.fade.taper + '% (가드·테이퍼는 기본값)' : '꺼짐') +
       ' · 옆·뒤에서 사진에 머리가 없던 뿌리 ' + Math.round(r.bareShare * 100) + '%');
     L.push('  뿌리 볼륨 ' + sp.styling.volume + ' (윗머리 두께 ' + n1(r.tTopCm) + 'cm) · 넘김 ' + (sp.styling.sweep > 0 ? '+' : '') + sp.styling.sweep + ' (' + (sp.styling.sweep > 15 ? '뒤로' : sp.styling.sweep < -15 ? '앞으로' : '중립') + ')');
@@ -1800,5 +1830,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011i — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011k — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();

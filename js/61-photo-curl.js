@@ -387,6 +387,55 @@
     }
     return out;
   }
+  /* (2026-10-11d) 기준선 없이 컬 모양 — 사용자: "기준을 두지 않고 결흐름대로만" · "웨이브 판정 이거 아직 판정해야돼?"
+   *  얼마나 고리인가 w(0 = 납작한 S자 · 1 = 둥근 나선)를 사진 선의 두 값으로 정함: 고리 정도(0.15→0 · 0.5→1)와 가파름(진폭÷파장 0.06→0 · 0.15→1)의 평균.
+   *  크기·간격은 w만큼 나선 측정(42번 반경·한 바퀴)에서, 1−w만큼 사진 선(진폭·파장)에서. 앞뒤(두상 바깥) 굴곡 = 크기 × w.
+   *  사진 선이 없으면 나선 측정만(w=1). 위상은 뿌리 자리의 부드러운 함수(칸 경계 없음 — 두상 위 격자 줄 고침) + 가닥마다 조금. */
+  PC.shapeMode = true; PC.shapeLoop = [0.15, 0.5]; PC.shapeSteep = [0.06, 0.15]; PC.shapeRootCm = 1.5; PC.phaseWaveCm = 7; PC.phaseJit = 0.5;
+  var bsMemo = { key: '', v: null };
+  function blendShape(pm) {
+    var key = ''; try { key = [pm.rCm, pm.pitchCm, wsMemo.key].join('|'); } catch (e) {}
+    var ws = waveShape();
+    if (bsMemo.key === key + '|' + (ws ? ws.loop : '') && bsMemo.v) return bsMemo.v;
+    var rH = pm.rCm > 0 ? pm.rCm * PC.radiusK : null, pH = pm.pitchCm > 0 ? pm.pitchCm : (rH ? rH * 2 : null), w = 1, A, L, src;
+    function cl(x) { return Math.max(0, Math.min(1, x)); }
+    if (ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
+      var wl = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), stp = ws.ampCm / ws.lamCm, wsx = cl((stp - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
+      w = (wl + wsx) / 2;
+      A = rH ? (1 - w) * ws.ampCm + w * rH : ws.ampCm; L = pH ? (1 - w) * ws.lamCm + w * pH : ws.lamCm; src = '사진 선 + 나선 측정';
+    } else if (rH && pH) { A = rH; L = pH; src = '나선 측정만'; }
+    else return null;
+    var v = { A: A, L: L, w: w, depth: w };
+    bsMemo = { key: key + '|' + (ws ? ws.loop : ''), v: v };
+    mqS.shapeTxt = '고리 정도 ' + (ws ? (+ws.loop).toFixed(2) : '-') + ' · 가파름 ' + (ws ? (ws.ampCm / ws.lamCm).toFixed(3) : '-') + ' → 나선 쪽 ' + w.toFixed(2) + ' · 크기 ' + A.toFixed(2) + 'cm · 한 번 ' + L.toFixed(1) + 'cm · 앞뒤 굴곡 ×' + w.toFixed(2) + ' (' + src + ')';
+    try { console.log(TAG + ' ③ 컬 모양(기준선 없음) — ' + mqS.shapeTxt); } catch (e) {}
+    return v;
+  }
+  function smoothPhase(r0) {                                              // 자리에 따라 부드럽게 바뀌는 위상(파장 phaseWaveCm)
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / (PC.phaseWaveCm / cpu);
+    return Math.PI * (Math.sin(r0.x * k + 1.3) + Math.sin(r0.y * k * 0.83 + 2.1) + Math.sin(r0.z * k * 1.17 + 0.4)) + PC.phaseJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5);
+  }
+  function shapeStrand(g, SH) {
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, Au = SH.A / cpu, Lu = SH.L / cpu, ru = PC.shapeRootCm / cpu;
+    var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
+    var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
+    var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
+    var ph = smoothPhase(g[0]), ds = Math.min(Lu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0;
+    for (i = 0; i < m; i++) {
+      var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
+      var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], b = g[j + 1];
+      var px = a.x + (b.x - a.x) * u, py = a.y + (b.y - a.y) * u, pz = a.z + (b.z - a.z) * u;
+      var tx = b.x - a.x, ty = b.y - a.y, tz = b.z - a.z, tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      var ox = px, oy = py - CY0, oz = pz, od = ox * tx + oy * ty + oz * tz; ox -= od * tx; oy -= od * ty; oz -= od * tz;   // 바깥 방향(축에 수직으로)
+      var ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
+      var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
+      var wr = Math.min(1, s / Math.max(1e-6, ru)); wr = wr * wr * (3 - 2 * wr);
+      var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * SH.depth * Math.sin(t);
+      out.push({ x: px + bx * c1 + ox * c2, y: py + by * c1 + oy * c2, z: pz + bz * c1 + oz * c2 });
+    }
+    return out;
+  }
+  PC.blendShape = blendShape;
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
   PC.mqPushIn = true; mqS.pushed = 0;
   function pushIn(res, axis) {
@@ -405,16 +454,21 @@
     var M = mqSolve(C, pm.rCm * PC.radiusK, pm.pitchCm > 0 ? pm.pitchCm : null);
     var CB = CURL_BUNDLE, o = {}, sv = {}, k, args = Array.prototype.slice.call(arguments);
     // (2026-10-11d) 컬의 축은 3D 머리 덩어리(42번) 안에서 끝 — 축이 덩어리를 빠져나가면(두 점 연속) 거기까지(사진에서 잰 길이 · 얼굴 앞으로 내려오던 앞머리 축)
-    if (PC.mqVolCut && G && G.vol && g && g.length > 3) {
+    var VC = (G && (G.volT || G.vol)) || null;   // (2026-10-11d) 축은 좁은 덩어리(여유 둔 교집합)에서 끊음 — 넓은 덩어리(다수결)로는 이마 앞 공중·옆머리 틈으로 나간 축(더듬이)이 안 끊겼음
+    if (PC.mqVolCut && VC && g && g.length > 3) {
       var cpu = CB.cmPerUnit || 19.33, acc = 0, outRun = 0, cutAt = -1, j3;
       for (j3 = 1; j3 < g.length; j3++) {
         acc += Math.hypot(g[j3].x - g[j3 - 1].x, g[j3].y - g[j3 - 1].y, g[j3].z - g[j3 - 1].z);
         if (acc * cpu < PC.mqVolKeepCm) continue;
-        if (G.vol.at(g[j3]) === 0) { if (++outRun >= 2) { cutAt = j3 - 1; break; } } else outRun = 0;
+        if (VC.at(g[j3]) === 0) { if (++outRun >= 2) { cutAt = j3 - 1; break; } } else outRun = 0;
       }
       if (cutAt > 1) { args[0] = g.slice(0, cutAt); mqS.cut = (mqS.cut || 0) + 1; }
     }
     var axis0 = args[0];
+    if (PC.shapeMode) {                                                   // (2026-10-11d) 기준선 없이 — 사진 선 모양과 나선 측정을 섞은 한 식
+      var SH = blendShape(pm);
+      if (SH) { mqS.shaped = (mqS.shaped || 0) + 1; return pushIn(shapeStrand(axis0, SH), axis0); }
+    }
     if (PC.waveMode) { var WS = waveShape(); if (WS && WS.isWave) { mqS.wave = (mqS.wave || 0) + 1; return pushIn(waveStrand(axis0, WS.ampCm, WS.lamCm), axis0); } }
     for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
     args[2] = M.wave / 100;
@@ -458,7 +512,7 @@
         '안 걸림(다시 기른 머리 화면이 아니거나 사진 컬이 ' + PC.lookMinCurl + ' 미만)')) +
       ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
-    if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' · 좁은 덩어리 밖으로 부푼 점을 당겨 넣음 ' + (mqS.pushed || 0) + ' · 웨이브(S자)로 감은 가닥 ' + (mqS.wave || 0) + ' (끄기 PHOTO_CURL.mqVolCut / mqPushIn / waveMode=false)');
+    if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' · 좁은 덩어리 밖으로 부푼 점을 당겨 넣음 ' + (mqS.pushed || 0) + ' · 기준선 없이 감은 가닥 ' + (mqS.shaped || 0) + (mqS.shapeTxt ? '(' + mqS.shapeTxt + ')' : '') + ' (끄기 PHOTO_CURL.mqVolCut / mqPushIn / waveMode=false)');
     return L;
   };
   var ppl = W.perfPanelLines;
@@ -475,5 +529,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011e · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011f · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
