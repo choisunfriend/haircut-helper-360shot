@@ -301,7 +301,7 @@
    *    · 뿌리부터 끝까지 감음(windCm 99 · rootLeaveCm 1) · 뭉침 모양(look)
    *    · 웨이브 = 엔진이 잰 반경을 내는 값, 한 바퀴 간격(pitchThick) = 잰 간격을 내는 값 — 엔진을 직선 가닥에 돌려 이분법으로 찾음(값마다 한 번)
    *    · 감으면 줄어드는 만큼 미리 늘림(엔진으로 잰 남는 비율) → 겉 길이 = 스펙 길이 */
-  PC.mq = true; PC.mqWind = 999; PC.mqRootLeave = 1; PC.mqStretch = true;
+  PC.mq = true; PC.mqVolCut = true; PC.mqVolKeepCm = 1; PC.mqWind = 999; PC.mqRootLeave = 1; PC.mqStretch = true;
   var mqMemo = { key: '', wave: null, pt: null, remain: 1, r: null, P: null }, mqS = PC.mqStats = { calls: 0, solved: '' };
   function origSpec() {
     try { var OM = W.ORIG_MQ; if (!OM || !OM.on || !mqOn() || typeof OM.isOriginal !== 'function' || !OM.isOriginal()) return null; var sp = OM.spec, pm = sp && sp.perm; return (pm && pm.curl >= PC.lookMinCurl && pm.rCm > 0) ? pm : null; } catch (e) { return null; }
@@ -342,9 +342,19 @@
     var pm = origSpec(); if (!pm || !(C > 0) || typeof CURL_BUNDLE === 'undefined') return null;
     var M = mqSolve(C, pm.rCm * PC.radiusK, pm.pitchCm > 0 ? pm.pitchCm : null);
     var CB = CURL_BUNDLE, o = {}, sv = {}, k, args = Array.prototype.slice.call(arguments);
+    // (2026-10-11d) 컬의 축은 3D 머리 덩어리(42번) 안에서 끝 — 축이 덩어리를 빠져나가면(두 점 연속) 거기까지(사진에서 잰 길이 · 얼굴 앞으로 내려오던 앞머리 축)
+    if (PC.mqVolCut && G && G.vol && g && g.length > 3) {
+      var cpu = CB.cmPerUnit || 19.33, acc = 0, outRun = 0, cutAt = -1, j3;
+      for (j3 = 1; j3 < g.length; j3++) {
+        acc += Math.hypot(g[j3].x - g[j3 - 1].x, g[j3].y - g[j3 - 1].y, g[j3].z - g[j3 - 1].z);
+        if (acc * cpu < PC.mqVolKeepCm) continue;
+        if (G.vol.at(g[j3]) === 0) { if (++outRun >= 2) { cutAt = j3 - 1; break; } } else outRun = 0;
+      }
+      if (cutAt > 1) { args[0] = g.slice(0, cutAt); mqS.cut = (mqS.cut || 0) + 1; }
+    }
     for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
     args[2] = M.wave / 100;
-    if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(g, 1 / M.remain); } catch (e) {} }
+    if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(args[0], 1 / M.remain); } catch (e) {} }
     var ks = M.ks || 1, r0 = args[0] && args[0][0];
     function sc(pts, f) { var o2 = new Array(pts.length), j, q; for (j = 0; j < pts.length; j++) { q = pts[j]; o2[j] = { x: r0.x + (q.x - r0.x) * f, y: r0.y + (q.y - r0.y) * f, z: r0.z + (q.z - r0.z) * f }; } return o2; }
     if (ks > 1 && r0) args[0] = sc(args[0], 1 / ks);
@@ -384,6 +394,7 @@
         '안 걸림(다시 기른 머리 화면이 아니거나 사진 컬이 ' + PC.lookMinCurl + ' 미만)')) +
       ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
+    if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' (끄기 PHOTO_CURL.mqVolCut=false)');
     return L;
   };
   var ppl = W.perfPanelLines;
@@ -400,5 +411,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011c · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011d · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
