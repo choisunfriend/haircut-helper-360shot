@@ -318,17 +318,20 @@
     for (i = 1; i < m; i++) if (p[i].x * p[i - 1].x < 0) zc.push(p[i].y);
     return { r: R.length ? R[R.length >> 1] : 0, P: zc.length > 3 ? (zc[1] - zc[zc.length - 1]) / ((zc.length - 2) / 2) * cm : NaN, remain: (p[0].y - p[m - 1].y) * cm / 30 };
   }
-  function mqSolve(C, rT, PT) {
-    var key = [C, rT.toFixed(2), PT ? PT.toFixed(2) : '-', PC.mqWind, PC.mqRootLeave, JSON.stringify(PC.look)].join('|');
+  function mqSolve(C, rT0, PT0) {
+    var key = [C, rT0.toFixed(2), PT0 ? PT0.toFixed(2) : '-', PC.mqWind, PC.mqRootLeave, JSON.stringify(PC.look)].join('|');
     if (mqMemo.key === key) return mqMemo;
+    // (2026-10-11a) 엔진이 낼 수 있는 가장 굵은 반경보다 굵으면(굵은 웨이브 3.9cm 등) 가닥을 ks배 줄여서 감고 다시 키움 — 반경·간격이 같이 ks배
+    var eMax = engineOn(C, 100, null), ks = (eMax.r > 0 && rT0 > eMax.r * 0.9) ? rT0 / (eMax.r * 0.9) : 1;
+    var rT = rT0 / ks, PT = PT0 ? PT0 / ks : PT0;
     var lo = 0, hi = 100, i, e, w = 50;
     for (i = 0; i < 9; i++) { w = (lo + hi) / 2; e = engineOn(C, w, null); if (e.r < rT) lo = w; else hi = w; }
     w = Math.round((lo + hi) / 2);
     var pt = PC.look.pitchThick || 1.4;
     if (PT > 0) { var a = 0.2, b = 6; for (i = 0; i < 9; i++) { pt = Math.sqrt(a * b); e = engineOn(C, w, pt); if (!(e.P > 0) || e.P < PT) a = pt; else b = pt; } pt = Math.sqrt(a * b); }
     e = engineOn(C, w, pt);
-    mqMemo = { key: key, wave: w, pt: pt, remain: Math.max(0.12, Math.min(1, e.remain)), r: e.r, P: e.P };
-    mqS.solved = '컬 ' + C + ' · 잰 반경 ' + rT.toFixed(2) + 'cm' + (PT ? ' · 잰 간격 ' + PT.toFixed(1) + 'cm' : '') + ' → 웨이브 ' + w + ' · 간격 값 ' + pt.toFixed(2) + ' (엔진: 반경 ' + e.r.toFixed(2) + ' · 간격 ' + (e.P > 0 ? e.P.toFixed(1) : '-') + 'cm · 남는 길이 ' + e.remain.toFixed(2) + ')';
+    mqMemo = { key: key, wave: w, pt: pt, ks: ks, remain: Math.max(0.12, Math.min(1, e.remain)), r: e.r * ks, P: e.P * ks };
+    mqS.solved = '컬 ' + C + ' · 잰 반경 ' + rT0.toFixed(2) + 'cm' + (PT0 ? ' · 잰 간격 ' + PT0.toFixed(1) + 'cm' : '') + ' → 웨이브 ' + w + ' · 간격 값 ' + pt.toFixed(2) + (ks > 1 ? ' · 가닥을 1/' + ks.toFixed(2) + '로 줄여 감고 다시 키움' : '') + ' (엔진: 반경 ' + (e.r * ks).toFixed(2) + ' · 간격 ' + (e.P > 0 ? (e.P * ks).toFixed(1) : '-') + 'cm · 남는 길이 ' + e.remain.toFixed(2) + ')';
     try { console.log(TAG + ' ④ 마네킹 위 잰 컬 — ' + mqS.solved); } catch (e2) {}
     return mqMemo;
   }
@@ -339,9 +342,12 @@
     for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
     args[2] = M.wave / 100;
     if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(g, 1 / M.remain); } catch (e) {} }
+    var ks = M.ks || 1, r0 = args[0] && args[0][0];
+    function sc(pts, f) { var o2 = new Array(pts.length), j, q; for (j = 0; j < pts.length; j++) { q = pts[j]; o2[j] = { x: r0.x + (q.x - r0.x) * f, y: r0.y + (q.y - r0.y) * f, z: r0.z + (q.z - r0.z) * f }; } return o2; }
+    if (ks > 1 && r0) args[0] = sc(args[0], 1 / ks);
     for (k in o) { sv[k] = CB[k]; CB[k] = o[k]; }
     mqS.calls++;
-    try { return innerCurl.apply(this, args); } finally { for (k in sv) CB[k] = sv[k]; }
+    try { var res = innerCurl.apply(this, args); return (ks > 1 && r0 && res && res.length) ? sc(res, ks) : res; } finally { for (k in sv) CB[k] = sv[k]; }
   }
   if (typeof innerCurl === 'function') {
     W.curlStrand3D = function () {
@@ -391,5 +397,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261010c · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011a · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
