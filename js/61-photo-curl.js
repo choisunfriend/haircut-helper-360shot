@@ -315,7 +315,10 @@
     var m = p.length, R = [], H = Math.max(5, Math.round(m / 40)), zc = [];
     for (i = H; i < m - H; i++) { var ax = 0, az = 0, j; for (j = i - H; j <= i + H; j++) { ax += p[j].x; az += p[j].z; } ax /= 2 * H + 1; az /= 2 * H + 1; R.push(Math.hypot(p[i].x - ax, p[i].z - az) * cm); }
     R.sort(function (x, y) { return x - y; });
-    for (i = 1; i < m; i++) if (p[i].x * p[i - 1].x < 0) zc.push(p[i].y);
+    // (2026-10-11c) 한 바퀴 간격 — 가닥 축(이동 평균)에서 벗어난 x가 부호를 바꾸는 자리로 셈(예전: x=0 기준이라 축이 옆으로 흐르면 못 셌음 → 간격 값이 끝까지 올라가 웨이브가 풀림)
+    var dxs = new Float64Array(m);
+    for (i = 0; i < m; i++) { var lo2 = Math.max(0, i - H), hi2 = Math.min(m - 1, i + H), sx = 0, j2; for (j2 = lo2; j2 <= hi2; j2++) sx += p[j2].x; dxs[i] = p[i].x - sx / (hi2 - lo2 + 1); }
+    for (i = H + 1; i < m - H; i++) if (dxs[i] * dxs[i - 1] < 0) zc.push(p[i].y);
     return { r: R.length ? R[R.length >> 1] : 0, P: zc.length > 3 ? (zc[1] - zc[zc.length - 1]) / ((zc.length - 2) / 2) * cm : NaN, remain: (p[0].y - p[m - 1].y) * cm / 30 };
   }
   function mqSolve(C, rT0, PT0) {
@@ -328,7 +331,7 @@
     for (i = 0; i < 9; i++) { w = (lo + hi) / 2; e = engineOn(C, w, null); if (e.r < rT) lo = w; else hi = w; }
     w = Math.round((lo + hi) / 2);
     var pt = PC.look.pitchThick || 1.4;
-    if (PT > 0) { var a = 0.2, b = 6; for (i = 0; i < 9; i++) { pt = Math.sqrt(a * b); e = engineOn(C, w, pt); if (!(e.P > 0) || e.P < PT) a = pt; else b = pt; } pt = Math.sqrt(a * b); }
+    if (PT > 0) { var a = 0.2, b = 6; for (i = 0; i < 9; i++) { pt = Math.sqrt(a * b); e = engineOn(C, w, pt); if (!(e.P > 0)) { b = pt; continue; } if (e.P < PT) a = pt; else b = pt; } pt = Math.sqrt(a * b); }   // 간격을 못 재면(감기지 않음) 더 촘촘한 쪽으로
     e = engineOn(C, w, pt);
     mqMemo = { key: key, wave: w, pt: pt, ks: ks, remain: Math.max(0.12, Math.min(1, e.remain)), r: e.r * ks, P: e.P * ks };
     mqS.solved = '컬 ' + C + ' · 잰 반경 ' + rT0.toFixed(2) + 'cm' + (PT0 ? ' · 잰 간격 ' + PT0.toFixed(1) + 'cm' : '') + ' → 웨이브 ' + w + ' · 간격 값 ' + pt.toFixed(2) + (ks > 1 ? ' · 가닥을 1/' + ks.toFixed(2) + '로 줄여 감고 다시 키움' : '') + ' (엔진: 반경 ' + (e.r * ks).toFixed(2) + ' · 간격 ' + (e.P > 0 ? (e.P * ks).toFixed(1) : '-') + 'cm · 남는 길이 ' + e.remain.toFixed(2) + ')';
@@ -397,5 +400,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011a · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011c · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
