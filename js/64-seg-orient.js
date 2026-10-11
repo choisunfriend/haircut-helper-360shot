@@ -309,3 +309,35 @@
     return r;
   };
 })();
+
+/* 2026-10-11a — 페이드 높이를 "옆·뒤 클리퍼 구역 전체"에서 재기
+ * 사용자: "남자는 뒷머리 페이드 중간에 좀 긴머리가 있어."
+ * 진단 파일(11:00): 뒤 가운데 뿌리를 높이별로 보면 후두부 아래(정수리에서 10cm)는 0.2cm로 깎였는데, 그 아래 목덜미 위쪽(12~14cm)이 1.2~1.9cm, 더 아래(16~20cm)는 다시 0.2cm.
+ * 원인: 페이드 식(17b fadeCutLen)이 높이를 섹션마다 따로 잼(sectionCutGuide의 yLo~yHi = 그 섹션 뿌리 범위). 페이드 높이 75%면
+ *   후두부는 후두부 안에서 아래 75%, 목덜미는 목덜미 안에서 아래 75%만 깎임 → 목덜미 위쪽 25%가 안 깎인 띠로 남음(후두부 아래와 목덜미 아래 사이).
+ * 지금: 관자·옆·후두·목덜미 가닥은 높이를 네 섹션을 합친 범위(가장 낮은 yLo ~ 가장 높은 yHi)에서 잼 → 페이드 선 하나로 이어짐. 끄기 FADE_ZONE.on=false */
+(function () {
+  var W = window, inner = W.fadeCutLen, SECS = ['temple', 'side', 'occipital', 'nape'];
+  var FZ = W.FADE_ZONE = Object.assign({ on: true, stats: { n: 0 } }, W.FADE_ZONE || {});
+  if (typeof inner !== 'function' || typeof W.sectionCutGuide !== 'function') return;
+  var memo = { key: '', lo: null, hi: null };
+  function zone() {
+    var key = '';
+    try { key = SECS.map(function (s) { return (state.sections && state.sections[s] ? state.sections[s].length : '') ; }).join(',') + '|' + (state.hair3Dneutral ? 1 : 0); } catch (e) {}
+    if (memo.key === key && memo.lo != null) return memo;
+    var lo = Infinity, hi = -Infinity;
+    SECS.forEach(function (s) { try { var g = W.sectionCutGuide(s, state.sections && state.sections[s] ? state.sections[s].length : 50); if (g && g.yHi > g.yLo) { if (g.yLo < lo) lo = g.yLo; if (g.yHi > hi) hi = g.yHi; } } catch (e) {} });
+    memo = { key: key, lo: isFinite(lo) ? lo : null, hi: isFinite(hi) ? hi : null };
+    return memo;
+  }
+  W.fadeCutLen = function (st, gd, L) {
+    try {
+      if (FZ.on && st && gd && SECS.indexOf(st.sec) >= 0) {
+        var z = zone();
+        if (z.lo != null && z.hi > z.lo) { var g2 = Object.assign({}, gd, { yLo: z.lo, yHi: z.hi }); FZ.stats.n++; return inner.call(this, st, g2, L); }
+      }
+    } catch (e) {}
+    return inner.apply(this, arguments);
+  };
+  console.log('[64] 페이드 높이 = 옆·뒤 클리퍼 구역 전체 기준(섹션마다 따로 재던 것 고침) · 끄기 FADE_ZONE.on=false');
+})();

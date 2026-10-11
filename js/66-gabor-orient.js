@@ -1,4 +1,4 @@
-/* 66-gabor-orient.js — 결 읽기를 방향 필터(가버 묶음)로 (2026-10-11a)
+/* 66-gabor-orient.js — 결 읽기를 방향 필터(가버 묶음)로 (2026-10-11b)
  * 사용자: "어차피 차이가 없으면 방향필터로 가두면 실사사진갔을 때 효과를 볼거잖아?"
  * 지금(04번): 구조 텐서 — 주변 7×7 밝기 기울기를 평균 내서 방향을 구함. 직모엔 맞지만 가는 가닥·곱슬에선 여러 방향이 섞여 흐려짐.
  * 바꾼 것: 머리카락 한 올 굵기에 맞춘 "가는 선 필터"를 n방향(기본 16)으로 돌려 대 보고, 가장 크게 반응한 방향을 그 자리의 결로.
@@ -37,6 +37,53 @@
     for (y = 0; y < Hd; y++) for (x = 0; x < Wd; x++) { var v2 = 0; for (i = -r; i <= r; i++) { var yy = y + i; if (yy < 0) yy = 0; else if (yy >= Hd) yy = Hd - 1; v2 += k[i + r] * t[yy * Wd + x]; } o[y * Wd + x] = v2; }
     return o;
   }
+  /* (2026-10-11b) 결을 따라 선을 그어 모양을 잼 — 사용자: "방향필터가 있는데 이거 구분해서 해야돼?"
+   *  선마다: 굽는 방향이 번갈아 바뀌면 S자(웨이브), 한쪽으로만 계속 굽으면 고리(컬). 고리 정도 = |굽은 각의 합| ÷ 굽은 각 크기의 합(0 = S자 · 1 = 고리)
+   *  파장 = 선 길이 × 2 ÷ 굽는 방향이 바뀐 횟수 · 진폭 = 선이 제 평균선(파장 폭)에서 벗어난 거리의 90% 값 ÷ 0.988   (사진 px) */
+  GO.shapeStep = 10; GO.shapeMaxLen = 260; GO.shapeMinLen = 40;
+  function shapeOf(ang, mask, Wd, Hd, rr) {
+    var st = GO.shapeStep, lines = [], x0, y0;
+    function trace(x, y, sgn) {
+      var P = [], pdx = 0, pdy = 0, k;
+      for (k = 0; k < GO.shapeMaxLen; k++) {
+        var xi = x | 0, yi = y | 0; if (xi < rr || yi < rr || xi >= Wd - rr || yi >= Hd - rr) break;
+        var id = yi * Wd + xi; if (!mask[id]) break;
+        var t = ang[id], dx = Math.cos(t), dy = Math.sin(t);
+        if (k === 0) { dx *= sgn; dy *= sgn; } else if (dx * pdx + dy * pdy < 0) { dx = -dx; dy = -dy; }
+        if (k > 0 && dx * pdx + dy * pdy < 0.5) break;                     // 한 걸음에 60° 넘게 꺾이면(잡음) 멈춤
+        P.push(x, y); x += dx; y += dy; pdx = dx; pdy = dy;
+      }
+      return P;
+    }
+    for (y0 = st; y0 < Hd - st; y0 += st) for (x0 = st; x0 < Wd - st; x0 += st) {
+      if (!mask[y0 * Wd + x0]) continue;
+      var a = trace(x0 + 0.5, y0 + 0.5, 1), b = trace(x0 + 0.5, y0 + 0.5, -1), P = [], i;
+      for (i = b.length - 2; i >= 2; i -= 2) P.push(b[i], b[i + 1]);
+      for (i = 0; i < a.length; i += 2) P.push(a[i], a[i + 1]);
+      var n = P.length / 2; if (n < GO.shapeMinLen) continue;
+      // 굽은 각(4px 간격 방향 차)
+      var th = [], j; for (j = 4; j < n; j += 2) th.push(Math.atan2(P[j * 2 + 1] - P[(j - 4) * 2 + 1], P[j * 2] - P[(j - 4) * 2]));
+      var kap = []; for (j = 1; j < th.length; j++) { var dd = th[j] - th[j - 1]; while (dd > Math.PI) dd -= 2 * Math.PI; while (dd < -Math.PI) dd += 2 * Math.PI; kap.push(dd); }
+      var sm = []; for (j = 0; j < kap.length; j++) { var s2 = 0, c2 = 0, q; for (q = Math.max(0, j - 2); q <= Math.min(kap.length - 1, j + 2); q++) { s2 += kap[q]; c2++; } sm.push(s2 / c2); }
+      var sAbs = 0, sSig = 0, flips = 0, last = 0; for (j = 0; j < sm.length; j++) { sAbs += Math.abs(sm[j]); sSig += sm[j]; if (Math.abs(sm[j]) > 0.02) { var sg = sm[j] > 0 ? 1 : -1; if (last && sg !== last) flips++; last = sg; } }
+      var straight = sAbs < 0.6;
+      var lam = flips > 0 ? 2 * n / flips : NaN;
+      // 진폭: 파장 폭 이동 평균선에서 벗어난 거리
+      var amp = NaN; if (isFinite(lam) && lam > 6 && lam < n) { var hw = Math.max(2, Math.round(lam / 2)), devs = []; for (j = hw; j < n - hw; j += 2) { var mx = 0, my = 0, c3 = 0, q2; for (q2 = j - hw; q2 <= j + hw; q2++) { mx += P[q2 * 2]; my += P[q2 * 2 + 1]; c3++; } devs.push(Math.hypot(P[j * 2] - mx / c3, P[j * 2 + 1] - my / c3)); } devs.sort(function (u, v) { return u - v; }); if (devs.length) amp = devs[Math.min(devs.length - 1, Math.floor(devs.length * 0.9))] / 0.988; }   // 90%(사인의 꼭대기 근처) — 뿌리 쪽 곧은 구간에 끌려 작게 재지 않게
+      lines.push({ n: n, straight: straight, loop: sAbs > 1e-6 ? Math.abs(sSig) / sAbs : 0, lam: lam, amp: amp });
+    }
+    function med(a) { a = a.filter(function (v) { return isFinite(v); }).sort(function (u, v) { return u - v; }); return a.length ? a[a.length >> 1] : NaN; }
+    var bent = lines.filter(function (l) { return !l.straight; });
+    return { lines: lines.length, bent: bent.length, straightFrac: lines.length ? 1 - bent.length / lines.length : 1,
+      loop: med(bent.map(function (l) { return l.loop; })), lamPx: med(bent.map(function (l) { return l.lam; })), ampPx: med(bent.map(function (l) { return l.amp; })) };
+  }
+  // 사진마다 identity에 붙임(42번의 컬 재기와 같은 자리)
+  var oMI = W.measureViewHairIdentity;
+  if (typeof oMI === 'function') W.measureViewHairIdentity = function (a) {
+    var id = oMI.apply(this, arguments);
+    try { if (id && GO.last && a && GO.last.w === a.w && GO.last.h === a.h) { id.waveShape = GO.last.shape; } } catch (e) {}
+    return id;
+  };
   W.computeHairOrientationField = function (px, mask, Wd, Hd) {
     var f = inner.apply(this, arguments);
     if (!GO.on || !f || !f.angle || !px || px.length < Wd * Hd * 4 || !mask) return f;
@@ -59,6 +106,7 @@
         C2 = blur(C2, Wd, Hd, GO.lambda * 0.6); S2 = blur(S2, Wd, Hd, GO.lambda * 0.6);
         for (idx = 0; idx < N; idx++) if (mask[idx]) ang[idx] = 0.5 * Math.atan2(S2[idx], C2[idx]);
       }
+      try { GO.last = { w: Wd, h: Hd, shape: shapeOf(ang, mask, Wd, Hd, r) }; } catch (e2) { GO.last = null; }
       var A = f.angle, diffs = [];
       for (idx = 0; idx < N; idx++) {
         if (!mask[idx] || (idx % Wd) < r || (idx % Wd) >= Wd - r || idx < r * Wd || idx >= (Hd - r) * Wd) continue;
