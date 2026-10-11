@@ -12,7 +12,7 @@
  */
 (function () {
   var W = window, TAG = '[사진 맞춤]';
-  var VA = W.VIEW_ALIGN = Object.assign({ on: true, ref: 'front', band: [0.1, 0.5], nBand: 6, maxShiftCm: 4, kMin: 0.85, kMax: 1.15, iters: 3, minRowPx: 3 }, W.VIEW_ALIGN || {});
+  var VA = W.VIEW_ALIGN = Object.assign({ on: false /* (2026-10-11r) 원인 찾기 결과(직모 손님 · ?t=3,6,10,11) — 끔. 다시 켜기 VIEW_ALIGN.on=true */, ref: 'front', band: [0.1, 0.5], nBand: 6, maxShiftCm: 4, kMin: 0.85, kMax: 1.15, iters: 3, minRowPx: 3 }, W.VIEW_ALIGN || {});
   var last = null;
   function cmPerUnit() { try { return (typeof modelCmPerUnit === 'function' && modelCmPerUnit()) || 16.4; } catch (e) { return 16.4; } }
   function rowExt(c, iy) {                                  // 그 줄의 머리 픽셀 가로 범위(양끝 2%를 버림)
