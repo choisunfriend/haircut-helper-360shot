@@ -138,6 +138,7 @@
     tStep: 0.012,
     outlineCos: 0.3,    // 두께는 그 자리를 거의 옆에서(법선·카메라축 각 73° 이상) 보는 사진으로만 잼
     tFloor: 0.012,      // 두께 바닥(≈ 0.25cm)
+    lenCap: false,      // (2026-10-11f) 길이 상한(섹션 중앙값 × lenMul) 끔 — 길이는 3D 머리 덩어리 밖·누운 머리 두께로 끝남. 걸음 폭 정하는 데만 씀(걸음 수는 3배까지)
     lenPct: 0.5, lenMul: 1.25,    // 짧은 머리 길이 상한 = 섹션별 원본 가닥 길이 중앙값 × 1.25
     longPct: 0.95, longMul: 1.3,  // 긴 머리(어깨 아래로 내려오는 가닥이 longShare 넘게 있음)는 넉넉히
     longShare: 0.1,
@@ -180,11 +181,11 @@
     tapPx: 4,           // 머리 영역 판정 여유(800px 기준)
     gravity: 0.25,      // 두피 밖 구간에서 중력을 섞는 비율
     // (2026-10-04e) 뒷머리가 앞으로 쏠리는 것 막기 — 아래 backFix 설명 참고
-    backFix: true,
+    backFix: false,     // (2026-10-11f) 끔 — 두피 밖 3D 방향(tri3D)과 3D 머리 덩어리가 대신함(뒷머리 앞쏠림 막기)
     freeDepth: 0.6,     // 두피 밖 구간에서 사진 결이 지어낼 수 있는 깊이(카메라 쪽/반대쪽) 움직임 상한(가로·세로 움직임의 몇 배)
     backFrom: 0.1, backFull: 0.5,   // 두피를 벗어난 자리가 얼마나 뒤쪽인가(0 = 귀 옆 · 1 = 정뒤) — 이 구간에서 0→1로 막음
     // (2026-10-05k) 긴 머리는 목 아래에서 곧게 늘어뜨림 — 머리말 v6 참고
-    hangDown: true,
+    hangDown: false,    // (2026-10-11f) 끔 — 긴 머리도 3D 머리 덩어리를 빠져나가는 곳에서 끝(곧게 늘어뜨려 끝 높이 맞추기 대신)
     hangK: 0.6,         // 한 걸음마다 아래 방향을 섞는 비율(클수록 빨리 곧아짐)
     // (2026-10-05m) 기른 뒤 결 정렬 — 머리말 v7 참고
     align: true,
@@ -767,7 +768,7 @@
       }
       prev = { x: dt.x * sgn, y: dt.y * sgn, z: dt.z * sgn };
 
-      for (k = 0; k < G.maxSteps; k++) {
+      for (k = 0; k < (G.lenCap ? G.maxSteps : G.maxSteps * 3); k++) {
         steps++;
         if (!free) {
           // 두피 위 구간: 발은 두피면을 따라, 몸은 그 위 두께만큼 떠서
@@ -823,7 +824,7 @@
             if (Q.y <= hangTip) { miss = 0; stop = 'tip'; break; }
             miss = 0; if (TS) { rec(2, 0, exB); TS.push(1, Q.x, Q.y, Q.z); }
             pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; sFree += stp; prev = d;
-            if (s >= Lcap) { stop = 'cap'; break; }
+            if (G.lenCap && s >= Lcap) { stop = 'cap'; break; }
             continue;
           }
           var vq = vote(Q);
@@ -837,7 +838,7 @@
           if (vq === 0) { if (++miss >= 2) { stop = 'mask'; break; } } else miss = 0;
           pts.push({ x: Q.x, y: Q.y, z: Q.z }); P = Q; s += stp; sFree += stp; prev = d;
         }
-        if (s >= Lcap) { stop = 'cap'; break; }
+        if (G.lenCap && s >= Lcap) { stop = 'cap'; break; }
       }
       if (miss > 0) pts.length = Math.max(1, pts.length - miss);        // 머리 영역 밖으로 나간 꼬리는 버림
       if (pts.length < 3 && flip === 2 && G.stubCm > 0) {                 // (2026-10-10e) 안 뒤집은 얇은 자리 — 짧은 머리로 심음(안 심으면 결 표가 이웃 칸의 긴 길이를 가져와 귀 옆이 길게 늘어짐)
@@ -1788,5 +1789,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011e — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011f — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
