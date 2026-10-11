@@ -200,6 +200,7 @@
     alignCurlOff: 40,   // (2026-10-06p) 사진에서 잰 컬이 이 값 이상이면 결 정렬을 안 함(0~이 값 사이는 세기를 비례해서 줄임) · 0 = 컬과 무관하게 정렬
     // (2026-10-04g) 목 — 늘어뜨린 가닥이 목(과 그 아래 몸통 기둥) 안으로 못 들어가게. 화면에 보이는 목과 같은 치수.
     neck: false, neckMargin: 1.1,
+    hullRule: 'front',  // (2026-10-11h) 사용자: "다수결방식에 정면을 참고하는 걸로" — 'front' = 다수결 + 정면이 1cm 넘게 밖이면 머리 아님 ·    // (2026-10-11g) 'tol' = 여유 둔 교집합: 그 자리를 보는 사진 중 하나라도 머리 영역에서 여유(정면 1 · 옆·뒤 1.5cm) 넘게 밖이면 머리 아님 — 예전 다수결은 2:2 동점도 머리로 쳐서 웨이브 손님 덩어리가 1.3배 컸음 · 'face' = 다수결 + 마주 보는 사진
     hullViews: ['front', 'left', 'right', 'back'], hullMarginCm: 1.0, hullMarginSideCm: 1.5, hullFacing: true, hullCellPx: 3,   // (2026-10-11b) 그 자리를 가장 정면으로 마주 보는 사진이 '밖'이라고 하면 밖(정면 1cm · 옆·뒤 1.5cm 여유) — 사용자: "정 안맞는 곳은 해당 면의 사진영역으로 결정" · 사진 맞춤은 65번   // (2026-10-11a) 껍질 = 사진들의 "교집합" — 이 사진들이 머리 영역 밖(여유 이 cm 넘게)이라고 하면 다른 사진이 머리라고 해도 머리 아님. 정면은 얼굴 랜드마크로 맞춘 사진이라 믿을 수 있음 · [] = 예전 다수결만
     tri3D: true, tri3DMinDeg: 35, tri3DPrior: 0.15,   // (2026-10-11a) 두피 밖 결의 3D 방향 = 두 장 이상의 사진 결이 만드는 평면들의 교선(깊이를 직전 걸음에서 물려받지 않음) · 시선축이 이 각 이상 벌어진 사진들일 때만
     volume: true, volCellCm: 0.6,   // (2026-10-11d) 3D 머리 덩어리 — 사진 네 장(마주 보는 사진 규칙)으로 칸마다 머리/아님을 한 번 정해 두고, 걷기·61번(마네킹 위 컬의 축 길이)이 같은 덩어리를 씀
@@ -396,7 +397,7 @@
     });
     function hullOut(cam, ix, iy) { var h = cam.hull; if (!h) return false; var gx = Math.floor(ix / h.cp), gy = Math.floor(iy / h.cp); if (gx < 0 || gy < 0 || gx >= h.gw || gy >= h.gh) return true; return h.D[gy * h.gw + gx] > h.lim; }
     function voteRaw(p) {
-      var yes = 0, no = 0, i, cam, o, bf = -2, bOut = false;
+      var yes = 0, no = 0, i, cam, o, bf = -2, bOut = false, farNo = 0, frontOut = false;
       var frx = p.x / Es.a, fry = (p.y - CY) / Es.b, frz = p.z / Es.c, frl = Math.sqrt(frx * frx + fry * fry + frz * frz) || 1;   // 이 자리의 바깥 방향(두피 타원 기준)
       for (i = 0; i < cams.length; i++) {
         cam = cams[i]; o = proj(cam, p);
@@ -406,12 +407,14 @@
           if (behindSkull(cam, p)) continue;         // 두개골에 가림
         }
         var isHair = hairAt(cam, o.ix, o.iy);
-        if (isHair) yes++; else no++;
+        if (isHair) yes++; else { no++; if (cam.hull && hullOut(cam, o.ix, o.iy)) { farNo++; if (cam.angle === 'front') frontOut = true; } }
         if (cam.hull) {
           if (G.hullFacing) { var fc = (cam.R[6] * frx + cam.R[7] * fry + cam.R[8] * frz) / frl; if (fc > bf) { bf = fc; bOut = !isHair && hullOut(cam, o.ix, o.iy); } }
           else if (!isHair && o.z >= 0 && hullOut(cam, o.ix, o.iy)) { hullN++; return 0; }
         }
       }
+      if (G.hullRule === 'front') { if (yes + no === 0) return -1; if (frontOut) { hullN++; return 0; } return yes >= no ? 1 : 0; }   // (2026-10-11h) 다수결 + 정면 참고(정면이 1cm 넘게 밖이면 머리 아님)
+      if (G.hullRule === 'tol') { if (yes + no === 0) return -1; if (farNo) { hullN++; return 0; } return yes > 0 ? 1 : 0; }   // (2026-10-11g) 여유 둔 교집합
       if (bOut) { hullN++; return 0; }                                      // 마주 보는 사진이 "밖"
       return yes + no === 0 ? -1 : (yes >= no ? 1 : 0);
     }
@@ -1789,5 +1792,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011f — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011h — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
