@@ -9,7 +9,7 @@
  */
 (function () {
   var W = window, TAG = '[결 방향 필터]';
-  var GO = W.GABOR_ORIENT = Object.assign({ on: true, n: 16, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
+  var GO = W.GABOR_ORIENT = Object.assign({ on: true, replace: true, n: 16, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
   var inner = W.computeHairOrientationField;
   if (typeof inner !== 'function') { console.warn(TAG + ' computeHairOrientationField 없음 — 안 걸림'); return; }
   var KC = {};
@@ -112,7 +112,7 @@
         if (!mask[idx] || (idx % Wd) < r || (idx % Wd) >= Wd - r || idx < r * Wd || idx >= (Hd - r) * Wd) continue;
         var a = ang[idx]; while (a > Math.PI / 2) a -= Math.PI; while (a <= -Math.PI / 2) a += Math.PI;
         if ((idx & 63) === 0) { var dd = Math.abs(a - A[idx]); if (dd > Math.PI / 2) dd = Math.PI - dd; diffs.push(dd * 57.3); }
-        A[idx] = a;                                                         // 방향만 바꿈(coherence는 04번 값)
+        if (GO.replace !== false) A[idx] = a;                               // 방향만 바꿈(coherence는 04번 값) · (2026-10-11c) replace=false면 결 읽기는 예전 방식 그대로(모양 재기만)
       }
       diffs.sort(function (p, q) { return p - q; });
       GO.stats.calls++; GO.stats.ms = Math.round(performance.now() - t0); GO.stats.px = cnt; GO.stats.dMed = diffs.length ? diffs[diffs.length >> 1] : null;
