@@ -5,11 +5,13 @@
  *   그 뒤 믿을 만한(반응이 뚜렷한) 자리의 결로 둘레를 한 번 다듬음(이중각 평균). 머리 영역(mask) 픽셀만 계산.
  *   생성 사진(머리 영역 400px 남짓)에서는 지금 방식과 방향 차이 중앙값 4~6°(같은 결과) — 실사 고해상도에서 한 올 단위 결이 잡히는 쪽.
  *   coherence(결의 또렷함)는 뒤쪽 문턱값들이 지금 방식에 맞춰져 있어 04번 값을 그대로 씀. 방향(angle)만 바꿈.
+ * (2026-10-11c) replace: false — 결 읽기는 예전(04번 구조 텐서) 그대로 두고, 이 필터로는 컬·웨이브 모양(고리 정도·파장·진폭)만 잼(61번이 씀).
+ *   결 읽기까지 이 필터로 바꾸려면 GABOR_ORIENT.replace=true 후 사진을 다시 분석.
  * 이 파일은 42번보다 먼저 올려야 함(42번이 이 함수를 감싸서 컬을 잼). 끄기 GABOR_ORIENT.on=false
  */
 (function () {
   var W = window, TAG = '[결 방향 필터]';
-  var GO = W.GABOR_ORIENT = Object.assign({ on: true, n: 16, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
+  var GO = W.GABOR_ORIENT = Object.assign({ on: true, replace: false, n: 16, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
   var inner = W.computeHairOrientationField;
   if (typeof inner !== 'function') { console.warn(TAG + ' computeHairOrientationField 없음 — 안 걸림'); return; }
   var KC = {};
@@ -112,7 +114,7 @@
         if (!mask[idx] || (idx % Wd) < r || (idx % Wd) >= Wd - r || idx < r * Wd || idx >= (Hd - r) * Wd) continue;
         var a = ang[idx]; while (a > Math.PI / 2) a -= Math.PI; while (a <= -Math.PI / 2) a += Math.PI;
         if ((idx & 63) === 0) { var dd = Math.abs(a - A[idx]); if (dd > Math.PI / 2) dd = Math.PI - dd; diffs.push(dd * 57.3); }
-        A[idx] = a;                                                         // 방향만 바꿈(coherence는 04번 값)
+        if (GO.replace) A[idx] = a;                                         // 방향만 바꿈(coherence는 04번 값)
       }
       diffs.sort(function (p, q) { return p - q; });
       GO.stats.calls++; GO.stats.ms = Math.round(performance.now() - t0); GO.stats.px = cnt; GO.stats.dMed = diffs.length ? diffs[diffs.length >> 1] : null;
@@ -120,5 +122,5 @@
     } catch (e) { console.warn(TAG + ' 실패 — 예전 방식 그대로', e); }
     return f;
   };
-  console.log(TAG + ' 설치 — 사진 결을 ' + GO.n + '방향 가는 선 필터로 읽음(파장 ' + GO.lambda + 'px) · 끄기 GABOR_ORIENT.on=false');
+  console.log(TAG + ' 설치 — ' + GO.n + '방향 가는 선 필터(파장 ' + GO.lambda + 'px)로 ' + (GO.replace ? '사진 결을 읽음' : '컬·웨이브 모양만 잼(결 읽기는 예전 그대로 · 바꾸기 GABOR_ORIENT.replace=true)') + ' · 끄기 GABOR_ORIENT.on=false');
 })();

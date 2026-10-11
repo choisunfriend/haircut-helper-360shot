@@ -233,61 +233,15 @@
     return r;
   };
 
-  /* ---------------- ④ 페이드가 다시 기른 머리·결 표 머리에도 먹게 (2026-10-10c) ----------------
-   * 사용자: "페이드가 왜 안 먹어? 직접 조정해도 안 먹어"
-   * 원인: 페이드(17b fadeCutLen)는 마네킹 가닥을 자르는 길에만 들어 있음. 원본 머리(다시 기른 가닥 · 결 표대로 만든 가닥)는
-   *   42·59번이 따로 모양을 만들어서 그 길을 안 지나감 → 토글·슬라이더를 움직여도 그대로.
-   * 지금: 가닥 모양이 다 만들어진 뒤(맨 바깥) 같은 페이드 식으로 길이를 한 번 더 누름. 이미 잘린 가닥(마네킹 길)은 식이 "지금 길이와 페이드 길이 중 짧은 쪽"이라 그대로. */
-  SO.fadeAll = true; S.fadeCut = 0; var FADE_SECS = { temple: 1, side: 1, occipital: 1, nape: 1 };
-  var innerAdjF = W.adjustStrandGeom;
-  if (typeof innerAdjF === 'function') W.adjustStrandGeom = function (st) {
-    var out = innerAdjF.apply(this, arguments);
-    try {
-      if (!SO.fadeAll || !out || out.length < 2 || !st || !st.pts || !st.sec) return out;
-      if (!FADE_SECS[st.sec]) return out;                                   // 앱의 페이드와 같은 구역만(관자·옆·후두·목덜미)
-      var fd = state.fade; if (!fd || !fd.enabled || typeof W.fadeCutLen !== 'function' || typeof W.sectionCutGuide !== 'function') return out;
-      var sl = state.sections && state.sections[st.sec] ? state.sections[st.sec].length : 50;
-      var gd = W.sectionCutGuide(st.sec, sl); if (!gd) return out;
-      var L = 0, i; for (i = 1; i < out.length; i++) L += Math.hypot(out[i].x - out[i - 1].x, out[i].y - out[i - 1].y, out[i].z - out[i - 1].z);
-      if (!(L > 1e-6)) return out;
-      var Lf = W.fadeCutLen(st, gd, L);
-      if (!(Lf < L * 0.995)) return out;
-      var acc = 0, res = [out[0]];
-      for (i = 1; i < out.length; i++) {
-        var d = Math.hypot(out[i].x - out[i - 1].x, out[i].y - out[i - 1].y, out[i].z - out[i - 1].z);
-        if (acc + d >= Lf) { var t = (Lf - acc) / Math.max(1e-9, d); res.push({ x: out[i - 1].x + (out[i].x - out[i - 1].x) * t, y: out[i - 1].y + (out[i].y - out[i - 1].y) * t, z: out[i - 1].z + (out[i].z - out[i - 1].z) * t }); break; }
-        acc += d; res.push(out[i]);
-      }
-      if (res.length < 2) res.push(out[1]);
-      for (var k in out) if (!/^\d+$/.test(k)) { try { res[k] = out[k]; } catch (e) {} }   // 붙어 있던 표시(_pre 등)
-      S.fadeCut++;
-      return res;
-    } catch (e) { return out; }
-  };
-  var adjSigF = W.adjFilterSig;
-  if (typeof adjSigF === 'function') W.adjFilterSig = function () {
-    var s0 = adjSigF.apply(this, arguments);
-    try { var fd = state.fade; return s0 + '|fdA' + (SO.fadeAll && fd && fd.enabled ? [fd.height, fd.guard, fd.taper, fd.blendWidth, fd.disc].join(',') : 0); } catch (e) { return s0; }
-  };
-
   SO.lines = function () {
     var L = [TAG + ' 결 촘촘히 ' + (SO.dense ? '켜짐(' + SO.orientStepPx + 'px마다 · 옆 줄 섞기 ' + (SO.blendCols ? '켬' : '끔') + ' · 저장한 사진 ' + S.dense + '장 · 점 ' + S.samples + ')' : '꺼짐') +
-      ' · 영역 다시 찾기 ' + (SO.regrow ? '켜짐' : '꺼짐') + ' · 페이드(원본 머리에도) ' + (SO.fadeAll ? '켜짐(자른 가닥 ' + S.fadeCut + ')' : '꺼짐') + ' · 뿌리 고르게 ' + (SO.rootFix ? '켜짐' + (S.roots.length ? '(채운 칸 ' + S.roots[S.roots.length - 1].filled + ')' : '') : '꺼짐') + (S.err ? ' · ⚠ ' + S.err : '')];
+      ' · 영역 다시 찾기 ' + (SO.regrow ? '켜짐' : '꺼짐') + ' · 뿌리 고르게 ' + (SO.rootFix ? '켜짐' + (S.roots.length ? '(채운 칸 ' + S.roots[S.roots.length - 1].filled + ')' : '') : '꺼짐') + (S.err ? ' · ⚠ ' + S.err : '')];
     S.views.forEach(function (v, i) { L.push('  사진 ' + (i + 1) + ': ' + (v.note || ('+' + v.added + ' · 구멍 ' + v.filled + ' · ' + v.before + '→' + v.after + 'px · ' + v.ms + 'ms'))); });
     return L;
   };
   var ppl = W.perfPanelLines;
   if (typeof ppl === 'function') W.perfPanelLines = function () { var L = ppl.apply(this, arguments) || []; try { SO.lines().forEach(function (x) { L.push(x); }); } catch (e) {} return L; };
   console.log(TAG + ' 설치 — 사진 결을 ' + SO.orientStepPx + 'px마다 저장(예전: 세로줄마다 12곳) · 머리 영역을 이 손님 머리색·결 무늬로 다시 찾음. 새로 분석하는 사진부터 적용 · 끄기 SEG_ORIENT.dense=false / .regrow=false');
-})();
-
-/* 2026-10-10d — 얼굴 막음 끄기. 사용자: "최소화하는거는 이제 점점 없애라는 얘기야.
- * 튀어나오는 가닥들 어차피 3D결과보기에 갔다가 나오면 잘리긴 하니까."
- * 13b 의 얼굴 타원 막음(faceAt ≥ faceThr 이면 가닥을 끊음)을 끈다. 42 neck, 59 guardNeck 도 꺼 둠.
- * 되돌리기: HAIR_OCC3D.faceVeto = true */
-(function(){
-  try { if (window.HAIR_OCC3D || typeof HAIR_OCC3D !== 'undefined') { HAIR_OCC3D.faceVeto = false; } } catch (e) {}
-  console.log('[64] 얼굴·목 막음 꺼짐 (v20261010e · 되돌리기 HAIR_OCC3D.faceVeto=true, REGROW.neck=true)');
 })();
 
 /* 2026-10-10e — 마네킹 ON = 언제나 맨 마네킹(컬 0 · 쫙 편 머리).
@@ -308,36 +262,4 @@
     } catch (e) { console.warn('[64] 맨 마네킹 맞추기 실패', e); }
     return r;
   };
-})();
-
-/* 2026-10-11a — 페이드 높이를 "옆·뒤 클리퍼 구역 전체"에서 재기
- * 사용자: "남자는 뒷머리 페이드 중간에 좀 긴머리가 있어."
- * 진단 파일(11:00): 뒤 가운데 뿌리를 높이별로 보면 후두부 아래(정수리에서 10cm)는 0.2cm로 깎였는데, 그 아래 목덜미 위쪽(12~14cm)이 1.2~1.9cm, 더 아래(16~20cm)는 다시 0.2cm.
- * 원인: 페이드 식(17b fadeCutLen)이 높이를 섹션마다 따로 잼(sectionCutGuide의 yLo~yHi = 그 섹션 뿌리 범위). 페이드 높이 75%면
- *   후두부는 후두부 안에서 아래 75%, 목덜미는 목덜미 안에서 아래 75%만 깎임 → 목덜미 위쪽 25%가 안 깎인 띠로 남음(후두부 아래와 목덜미 아래 사이).
- * 지금: 관자·옆·후두·목덜미 가닥은 높이를 네 섹션을 합친 범위(가장 낮은 yLo ~ 가장 높은 yHi)에서 잼 → 페이드 선 하나로 이어짐. 끄기 FADE_ZONE.on=false */
-(function () {
-  var W = window, inner = W.fadeCutLen, SECS = ['temple', 'side', 'occipital', 'nape'];
-  var FZ = W.FADE_ZONE = Object.assign({ on: true, stats: { n: 0 } }, W.FADE_ZONE || {});
-  if (typeof inner !== 'function' || typeof W.sectionCutGuide !== 'function') return;
-  var memo = { key: '', lo: null, hi: null };
-  function zone() {
-    var key = '';
-    try { key = SECS.map(function (s) { return (state.sections && state.sections[s] ? state.sections[s].length : '') ; }).join(',') + '|' + (state.hair3Dneutral ? 1 : 0); } catch (e) {}
-    if (memo.key === key && memo.lo != null) return memo;
-    var lo = Infinity, hi = -Infinity;
-    SECS.forEach(function (s) { try { var g = W.sectionCutGuide(s, state.sections && state.sections[s] ? state.sections[s].length : 50); if (g && g.yHi > g.yLo) { if (g.yLo < lo) lo = g.yLo; if (g.yHi > hi) hi = g.yHi; } } catch (e) {} });
-    memo = { key: key, lo: isFinite(lo) ? lo : null, hi: isFinite(hi) ? hi : null };
-    return memo;
-  }
-  W.fadeCutLen = function (st, gd, L) {
-    try {
-      if (FZ.on && st && gd && SECS.indexOf(st.sec) >= 0) {
-        var z = zone();
-        if (z.lo != null && z.hi > z.lo) { var g2 = Object.assign({}, gd, { yLo: z.lo, yHi: z.hi }); FZ.stats.n++; return inner.call(this, st, g2, L); }
-      }
-    } catch (e) {}
-    return inner.apply(this, arguments);
-  };
-  console.log('[64] 페이드 높이 = 옆·뒤 클리퍼 구역 전체 기준(섹션마다 따로 재던 것 고침) · 끄기 FADE_ZONE.on=false');
 })();
