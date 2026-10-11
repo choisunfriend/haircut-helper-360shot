@@ -711,8 +711,8 @@
           if (polMap[ci2 * 4 + 3] !== 0 || (polMap[ci2 * 4] === 0 && polMap[ci2 * 4 + 1] === 0 && polMap[ci2 * 4 + 2] === 0)) continue;
           rr = ci2 / NT | 0; cc = ci2 % NT; var sum = 0, dr, dc;
           for (dr = -1; dr <= 1; dr++) for (dc = -1; dc <= 1; dc++) {
-            if (!dr && !dc) continue; var r2 = rr + dr, c2 = (cc + dc + NT) % NT; if (r2 < 0 || r2 >= NP) continue;
-            var cj = r2 * NT + c2; if (polMap[cj * 4 + 3] === 0) continue;
+            if (!dr && !dc) continue; var pr2 = rr + dr, pc2 = (cc + dc + NT) % NT; if (pr2 < 0 || pr2 >= NP) continue;
+            var cj = pr2 * NT + pc2; if (polMap[cj * 4 + 3] === 0) continue;
             sum += polMap[ci2 * 4] * polMap[cj * 4] + polMap[ci2 * 4 + 1] * polMap[cj * 4 + 1] + polMap[ci2 * 4 + 2] * polMap[cj * 4 + 2];
           }
           if (Math.abs(sum) > 0.15) { if (sum < 0) { polMap[ci2 * 4] *= -1; polMap[ci2 * 4 + 1] *= -1; polMap[ci2 * 4 + 2] *= -1; } polMap[ci2 * 4 + 3] = 2; polStat.nbr++; changed++; }
@@ -1788,5 +1788,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011d — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261011e — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();
