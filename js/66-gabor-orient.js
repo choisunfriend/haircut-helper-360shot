@@ -5,12 +5,15 @@
  *   그 뒤 믿을 만한(반응이 뚜렷한) 자리의 결로 둘레를 한 번 다듬음(이중각 평균). 머리 영역(mask) 픽셀만 계산.
  *   생성 사진(머리 영역 400px 남짓)에서는 지금 방식과 방향 차이 중앙값 4~6°(같은 결과) — 실사 고해상도에서 한 올 단위 결이 잡히는 쪽.
  *   coherence(결의 또렷함)는 뒤쪽 문턱값들이 지금 방식에 맞춰져 있어 04번 값을 그대로 씀. 방향(angle)만 바꿈.
- * (2026-10-12a) stride: 2 — 머리 픽셀을 가로·세로 한 칸씩 건너 계산(4분의 1)하고, 건너뛴 자리는 다듬기(둘레 평균)가 메움. 폰에서 사진 분석이 길어진 주범이라 줄임. 예전대로 GABOR_ORIENT.stride=1
+ * (2026-10-12c) 시간 줄이기 — 사용자: "끝까지 건너뛰지 않고 가는 게 낫겠다. 그 횟수를 줄여서 시간을 줄이자."
+ *   픽셀은 전부 계산(stride 1) · 방향 16 → 12(가장 센 방향과 양옆 반응으로 사이 각을 어림 interp) · 필터 칸 중 0에 가까운 칸(최대의 2% 미만)은 빼고 곱함(prune).
+ *   합성 무늬(직모·웨이브·곱슬)에서 약 1.9배 빠르고 결 방향 차이 중앙 0.6~1.1° · 컬·웨이브 측정값(직선 판정·기울기·파장·진폭)은 거의 같음. 8방향 이하는 웨이브 기울기가 57° → 67°로 달라져 안 씀.
+ *   예전대로: GABOR_ORIENT.n=16; .interp=false; .prune=0
  * 이 파일은 42번보다 먼저 올려야 함(42번이 이 함수를 감싸서 컬을 잼). 끄기 GABOR_ORIENT.on=false
  */
 (function () {
   var W = window, TAG = '[결 방향 필터]';
-  var GO = W.GABOR_ORIENT = Object.assign({ on: true, replace: true, stride: 2, n: 16, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
+  var GO = W.GABOR_ORIENT = Object.assign({ on: true, replace: true, stride: 1, prune: 0.02, interp: true, n: 12, lambda: 4, refine: true, stats: { calls: 0, ms: 0, px: 0, dMed: null } }, W.GABOR_ORIENT || {});
   var inner = W.computeHairOrientationField;
   if (typeof inner !== 'function') { console.warn(TAG + ' computeHairOrientationField 없음 — 안 걸림'); return; }
   var KC = {};
@@ -28,6 +31,20 @@
       out.push(K);
     }
     return (KC[key] = { K: out, r: r, sz: sz });
+  }
+  function sparse(KK, Wd) {                                               // (2026-10-12c) 필터 칸 중 값이 거의 0인 칸(가장 큰 값의 prune 미만)을 빼 둠 — 모든 픽셀을 계산하되 곱셈 수를 줄임
+    if (!(GO.prune > 0)) return null;
+    var key = 'sp' + GO.prune + '|' + Wd; if (KK[key]) return KK[key];
+    var out = [], r = KK.r, sz = KK.sz, k, x, y;
+    for (k = 0; k < KK.K.length; k++) {
+      var K = KK.K[k], mx = 0, i, o = [], w = [], drop = 0;
+      for (i = 0; i < K.length; i++) if (Math.abs(K[i]) > mx) mx = Math.abs(K[i]);
+      for (y = -r, i = 0; y <= r; y++) for (x = -r; x <= r; x++, i++) { if (Math.abs(K[i]) >= GO.prune * mx) { o.push(y * Wd + x); w.push(K[i]); } else drop += K[i]; }
+      var fix = drop / w.length; for (i = 0; i < w.length; i++) w[i] += fix;      // 뺀 칸의 합을 남은 칸에 고르게(합 0 유지 — 밝기만 다른 자리에 반응하지 않게)
+      out.push({ o: Int32Array.from(o), w: Float32Array.from(w) });
+    }
+    KK.taps = out[0].o.length;
+    return (KK[key] = out);
   }
   function gray(px, n) { var g = new Float32Array(n), i, j; for (i = 0, j = 0; i < n; i++, j += 4) g[i] = (0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]) / 255; return g; }
   function blur(a, Wd, Hd, sig) {                                          // 가우시안(분리) — 다듬기용
@@ -90,17 +107,20 @@
     if (!GO.on || !f || !f.angle || !px || px.length < Wd * Hd * 4 || !mask) return f;
     try {
       var t0 = performance.now(), N = Wd * Hd, g = gray(px, N), KK = kernels(GO.lambda, GO.n), r = KK.r, sz = KK.sz, n = GO.n;
-      var ang = new Float32Array(N), conf = new Float32Array(N), idx, x, y, k, i, j, cnt = 0;
+      var SP = sparse(KK, Wd), RV = new Float32Array(n), ang = new Float32Array(N), conf = new Float32Array(N), idx, x, y, k, i, j, cnt = 0;
       var sd = (GO.refine && GO.stride > 1) ? (GO.stride | 0) : 1;         // 다듬기를 끄면 메울 방법이 없으니 전부 계산
       for (y = r; y < Hd - r; y += sd) for (x = r; x < Wd - r; x += sd) {
         idx = y * Wd + x; if (!mask[idx]) continue;
         var best = -1, bk = 0, sumR = 0;
         for (k = 0; k < n; k++) {
-          var K = KK.K[k], v = 0, ki = 0;
-          for (j = -r; j <= r; j++) { var row = (y + j) * Wd + x - r; for (i = 0; i < sz; i++) v += K[ki++] * g[row + i]; }
-          v = v < 0 ? -v : v; sumR += v; if (v > best) { best = v; bk = k; }
+          var v = 0;
+          if (SP) { var so = SP[k].o, sw = SP[k].w, sn = so.length; for (i = 0; i < sn; i++) v += sw[i] * g[idx + so[i]]; }   // 0에 가까운 칸은 빼고 곱함
+          else { var K = KK.K[k], ki = 0; for (j = -r; j <= r; j++) { var row = (y + j) * Wd + x - r; for (i = 0; i < sz; i++) v += K[ki++] * g[row + i]; } }
+          v = v < 0 ? -v : v; RV[k] = v; sumR += v; if (v > best) { best = v; bk = k; }
         }
-        ang[idx] = bk * Math.PI / n + Math.PI / 2; conf[idx] = best > 1e-9 ? (best - sumR / n) / best : 0; cnt++;
+        var bo = 0;
+        if (GO.interp) { var vL = RV[(bk + n - 1) % n], vR = RV[(bk + 1) % n], den = vL - 2 * best + vR; if (den < -1e-12) { bo = 0.5 * (vL - vR) / den; if (bo > 0.5) bo = 0.5; else if (bo < -0.5) bo = -0.5; } }   // 가장 센 방향과 양옆 반응으로 사이 각을 어림(방향 수를 줄여도 각이 계단지지 않게)
+        ang[idx] = (bk + bo) * Math.PI / n + Math.PI / 2; conf[idx] = best > 1e-9 ? (best - sumR / n) / best : 0; cnt++;
       }
       if (GO.refine) {                                                   // 믿을 만한 자리의 결로 둘레를 한 번 다듬음
         var C2 = new Float32Array(N), S2 = new Float32Array(N);

@@ -151,6 +151,8 @@
     natTail: 1.1, natTailFull: 2,    // (g) 늘릴 때: 제 칸보다 긴 가닥도 스타일 칸 길이의 natTail배까지만(배수 natTailFull 이상에서 온전히) · 0 = 안 누름
     nativeWaitMs: 25000, // 다시 기르기를 이만큼 기다려도 안 끝나면 마네킹 방식으로 겁니다
     guardNeck: false,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
+    lenOwnOnly: true,    // (2026-10-12c) 가닥 길이 = 제 칸의 길이만(둘레 칸과 안 섞음) — 사용자: "왜 섞는거야? 그냥 가닥길이를 쓰면 안돼?" 머리선의 짧은 칸(짧게 심은·옆으로 눕힌 가닥)이 긴 이웃의 길이를 받아 제 방향 그대로 허공으로 뻗던 것(직모 손님 앞머리 가시 450가닥 → 0). 이웃 가닥과의 길이 차이는 그대로(중앙 0.49 → 0.50cm). false = 예전(섞음)
+    lenOwnCap: 0,        // lenOwnOnly를 끄고 쓸 때: 제 칸 길이의 이 배까지만 이웃과 섞음 · 0 = 끔
     fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
   }, W.FLOW_SPEC || {});
   var ST = FS.stats = { built: null, shaped: 0, fallback: 0, err: null, saveWarn: null };
@@ -503,6 +505,8 @@
     if (!nC || !(wsum > 1e-6) || _G[iH] !== H) { _G[0] = H; _Wt[0] = 1; wsum = 1; nC = 1; iH = 0; }
     var len = 0;
     if (lenOver > 0) len = lenOver; else { for (i = 0; i < nC; i++) len += _Wt[i] * quant(_G[i].q, h); len /= wsum; }
+    if (!(lenOver > 0) && cfg.lenOwnOnly) len = quant(H.q, h);
+    if (!(lenOver > 0) && cfg.lenOwnCap > 0) { var lenOwn = quant(H.q, h) * cfg.lenOwnCap; if (len > lenOwn) { len = lenOwn; if (cfg === FS) ST.lenCapped = (ST.lenCapped || 0) + 1; } }   // (2026-10-12c) 제 칸 길이보다 훨씬 길게는 이웃에서 끌어오지 않음 — 머리선의 짧은 칸(짧게 심은·옆으로 눕힌 가닥)이 이웃의 긴 길이를 받아 제 방향 그대로 허공으로 뻗던 것(가시·더듬이)
     if (!(len > 1e-4)) return null;
     var n = Math.max(cfg.minPts, Math.min(cfg.maxPts, Math.round(len / cfg.step))), ds = len / n, out = new Array(n + 1);
     var px = nx, py = ny, pz = nz, vx = e[0], vy = e[1], vz = e[2], s, fb, b0, tt, ax, ay, az, al, bA, bB, d, pl;
