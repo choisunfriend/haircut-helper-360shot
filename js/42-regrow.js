@@ -467,6 +467,7 @@
       pj.z = R[6] * x + R[7] * y + R[8] * z;
       return pj;
     }
+    try { G.cams = cams; G.camProj = function (cam, p) { var o = proj(cam, p); return { ix: o.ix, iy: o.iy, z: o.z }; }; } catch (eCP) {}   // (2026-10-12g) 61번이 3D 자리 → 사진 4장의 그 자리를 찾아 잰 모양을 모으는 데 씀
     function hairAt(cam, ix, iy) {
       var t = cam.tap, s = cam.smp;
       return s.at(ix, iy) > 0 || s.at(ix - t, iy) > 0 || s.at(ix + t, iy) > 0 || s.at(ix, iy - t) > 0 || s.at(ix, iy + t) > 0;

@@ -88,12 +88,13 @@
       var lam = flips > 0 ? 2 * n / flips : NaN;
       // 진폭: 파장 폭 이동 평균선에서 벗어난 거리
       var amp = NaN; if (isFinite(lam) && lam > 6 && lam < n) { var hw = Math.max(2, Math.round(lam / 2)), devs = []; for (j = hw; j < n - hw; j += 2) { var mx = 0, my = 0, c3 = 0, q2; for (q2 = j - hw; q2 <= j + hw; q2++) { mx += P[q2 * 2]; my += P[q2 * 2 + 1]; c3++; } devs.push(Math.hypot(P[j * 2] - mx / c3, P[j * 2 + 1] - my / c3)); } devs.sort(function (u, v) { return u - v; }); if (devs.length) amp = devs[Math.min(devs.length - 1, Math.floor(devs.length * 0.9))] / 0.988; }   // 90%(사인의 꼭대기 근처) — 뿌리 쪽 곧은 구간에 끌려 작게 재지 않게
-      lines.push({ n: n, straight: straight, loop: sAbs > 1e-6 ? Math.abs(sSig) / sAbs : 0, lam: lam, amp: amp });
+      var mid = (n >> 1) * 2; lines.push({ n: n, straight: straight, loop: sAbs > 1e-6 ? Math.abs(sSig) / sAbs : 0, lam: lam, amp: amp, x: P[mid], y: P[mid + 1] });   // (2026-10-12g) 선의 가운데 자리도 남김(61번이 자리별로 모음)
     }
     function med(a) { a = a.filter(function (v) { return isFinite(v); }).sort(function (u, v) { return u - v; }); return a.length ? a[a.length >> 1] : NaN; }
     var bent = lines.filter(function (l) { return !l.straight; });
     return { lines: lines.length, bent: bent.length, straightFrac: lines.length ? 1 - bent.length / lines.length : 1,
-      loop: med(bent.map(function (l) { return l.loop; })), lamPx: med(bent.map(function (l) { return l.lam; })), ampPx: med(bent.map(function (l) { return l.amp; })) };
+      loop: med(bent.map(function (l) { return l.loop; })), lamPx: med(bent.map(function (l) { return l.lam; })), ampPx: med(bent.map(function (l) { return l.amp; })),
+      w: Wd, h: Hd, L: lines.map(function (l) { return [l.x, l.y, l.straight ? 1 : 0, l.loop, l.lam, l.amp, l.n]; }) };   // (2026-10-12g) 선 하나하나(자리 x·y · 곧음 · 고리 정도 · 파장 · 진폭 · 길이) — 중앙값만 남기고 버리지 않음
   }
   // 사진마다 identity에 붙임(42번의 컬 재기와 같은 자리)
   var oMI = W.measureViewHairIdentity;
