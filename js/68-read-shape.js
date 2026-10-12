@@ -30,6 +30,14 @@
  *      64번 ③이 작은 덩어리는 채우고 넓고 빈 덩어리(대머리·숱 적은 곳)는 남김. → 앞이마 성긴 줄 · 그 위 밀집 띠가 없어짐.
  *   (가닥 수는 48번 adjustLow/High = 30000 · 42번 measureShare = 1로 같이 고침)
  *
+ * (2026-10-12o) 오늘 저녁 정리 — 무엇이 남았고 왜(같은 날 21:05 로그·영상 · 손님 2: 긴 웨이브 · 짧은 곱슬)
+ *   · 이 파일(오전 작업)을 2d2c950에서 되돌렸다가 다시 넣음(잔머리 때문인 줄 알고 되돌린 것이 잘못) · 42번 measureShare=1 · 48번 3D 결과 3만
+ *   · 축 고르기는 전부 뺌(42번 axisGabor=false · straightCurly=false) — 사용자: "결과를 바꾸기 위한 제한은 최대한 안 함. 읽은 걸 잘해서 결과로 잇는 게 먼저"
+ *     컬·웨이브 모두 사진 결을 그대로 걸은 길 → 이 파일이 마네킹 뿌리에 옮겨심음 → 61번이 방향 필터 선(높이별·가닥별) 굴곡을 얹음(shape)
+ *   · 느려진 원인 = 가닥당 점 수(기른 길 0.4cm 걸음 = 긴 머리 100점+ · 61번이 또 촘촘히 다시 찍음) — 완성본 3만: 12g 3.9초 → 12m 10.3초
+ *     12n(61번 점 줄임 · 조정 화면 1만/2만)에서 4.2초(웨이브) · 3.1초(곱슬) · 12o: 옮겨심은 길 48점 상한(maxPts) · 61번 한 번 굽는 데 8점(가닥당 120 상한)
+ *   · 결과(21:05 영상): 웨이브 풍성 · 컬 더 세밀 — 사용자 확인. 남은 것: 웨이브 손님 길이가 사진보다 짧음(어깨 근처에서 끝) · 3D에서 곱슬 부피가 조정 화면보다 작아 보임
+ *   · 50번 어깨 처리는 다시 끔(조정 화면 가슴 높이 가로줄 · 쭈글한 띠)
  * 끄기: READ_SHAPE.on=false(B·C) · READ_SHAPE.waveRaw=false(A) · READ_SHAPE.evenRoots=false(D) — 바꾼 뒤 사진을 다시 분석하거나 마네킹을 켰다 끄기
  * ========================================================================== */
 (function () {
@@ -48,6 +56,7 @@
     rootNbr: 0.06,       // C: 뿌리 이웃 칸(≈ 1.2cm · 둘레 27칸 ≈ 3.5cm 안의 뿌리들이 기준)
     rootCell: 0.04,      // B: 뿌리 찾기 칸(≈ 0.8cm)
     reach: 4,            // B
+    maxPts: 48,          // (2026-10-12o) 옮겨심은 길의 점 수 상한(웨이브 한 번에 8점쯤) · 0 = 그대로
     shape: true          // (2026-10-12j) 옮겨심은 축에 61번 굴곡(방향 필터 선 그대로)을 얹음 · false = 축만: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
   }, W.READ_SHAPE || {});
   var ST = RS.stats = { built: null, used: 0, fell: 0, curlAdd: 0, wave: null, roots: null, err: null };
@@ -150,6 +159,12 @@
   }
   RS.reindex = function () { IDX = null; return index() ? ST.built : null; };
 
+  function resample(p, M) {
+    var S = [0], i, j = 0, n = p.length; for (i = 1; i < n; i++) S.push(S[i - 1] + Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y, p[i].z - p[i - 1].z));
+    var L = S[n - 1]; if (!(L > 0)) return p;
+    var out = new Array(M); for (i = 0; i < M; i++) { var s = L * i / (M - 1); while (j < n - 2 && S[j + 1] < s) j++; var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]); out[i] = { x: p[j].x + (p[j + 1].x - p[j].x) * u, y: p[j].y + (p[j + 1].y - p[j].y) * u, z: p[j].z + (p[j + 1].z - p[j].z) * u }; }
+    return out;
+  }
   function nearest(ix, p) {
     var RC = RS.rootCell, cx = Math.floor(p.x / RC), cy = Math.floor(p.y / RC), cz = Math.floor(p.z / RC), best = -1, bd = Infinity, r, a, b, c;
     for (r = 0; r <= RS.reach; r++) {
@@ -198,6 +213,7 @@
               var src = ix.arr[bi].pts, q0 = src[0], dx = root.x - q0.x, dy = root.y - q0.y, dz = root.z - q0.z, k;
               pts = new Array(src.length);
               for (k = 0; k < src.length; k++) pts[k] = { x: src[k].x + dx, y: src[k].y + dy, z: src[k].z + dz };
+              if (RS.maxPts > 2 && pts.length > RS.maxPts) pts = resample(pts, RS.maxPts);   // (2026-10-12o) 점 수를 마네킹 수준으로 — 기른 길은 0.4cm 걸음이라 긴 머리는 100점 넘음 → 그 뒤 모든 계산·그리기가 몇 배
             }
             mem = s._rsh = { ix: ix, pts: pts };
             if (pts) ST.used++; else ST.fell++;
@@ -217,7 +233,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : ''); } } catch (e) {}
+    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : '') + RS.maxPts; } } catch (e) {}
     return s;
   };
 
