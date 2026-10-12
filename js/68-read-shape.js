@@ -36,23 +36,16 @@
  *     옮겨심은 원본 머리는 59번 표(②)·61번 지어낸 물결/컬(③)을 안 거치므로 컬을 두 번 감지 않음(슬라이더로 스펙보다 올린 만큼만 더 감음).
  *   · C 그대로 — 더듬이(42번이 위로 뒤집어 기른 가닥 포함)는 눌러 펴지 않고 "거꾸로 자란 가닥"으로 봐서 본보기에서 빼고, 그 뿌리는 이웃의 바른 가닥 모양을 받음.
  *   · D(뿌리 고르게)는 이번 요청이 아니라 기본 꺼짐(evenRoots=false) · 가닥 수(48·42번)는 손대지 않음.
- * (2026-10-12g) 폰 확인 뒤 다시 — 사용자: "컬이 다 죽었어 · 마네킨을 안 켠 거 같은 느낌 · 얼굴·턱 아래 지저분한 가닥 · 컬과 웨이브는 이어지는 곡선이라 걷기로 안 돼.
- *   컬 직경·축 읽기·방향필터를 그대로 살리고 마네킨도 넣어 봐 · 뿌리는 고르게."
- *   · B(옮겨심기) 기본 꺼짐(transplant=false) — 걸은 길을 통째로 쓰면 마네킹 처리가 다 빠지고(결 표·컬 엔진), 걷기가 못 따라간 컬은 죽고, 얼굴 앞으로 걸어 내려온 가닥까지 심겼음.
- *     원본 = 마네킹(결 표 = 큰 흐름) + 61번 ③(사진 4장의 선을 자리별로 모은 크기·파장·고리 정도 + 42번 나선 측정)으로 곡선.
- *   · A(직모 뼈대 안 씀) 기본 꺼짐 — 곡선은 걸은 길에서 안 가져오니, 축 읽기(42번 한 바퀴 창)를 그대로 씀. 웨이브/컬 판정도 안 함.
- *   · C(거꾸로 자란 가닥)는 59번 결 표를 만들 때 그 가닥을 빼는 데 씀(READ_SHAPE.revOf) — 더듬이 뿌리는 이웃 칸의 결을 따름.
- *   · D(뿌리 고르게) 켬.
  * 끄기: READ_SHAPE.on=false(B·C) · READ_SHAPE.waveRaw=false(A) · READ_SHAPE.evenRoots=false(D) — 바꾼 뒤 사진을 다시 분석하거나 마네킹을 켰다 끄기
  * ========================================================================== */
 (function () {
   'use strict';
   var W = window, TAG = '[읽은 모양]';
   var RS = W.READ_SHAPE = Object.assign({
-    on: true,            // C(결 표에서 거꾸로 자란 가닥 빼기) · B는 transplant도 켜야
-    transplant: false,   // B(2026-10-12g 기본 꺼짐)
-    rawPath: false,      // A(2026-10-12g 기본 꺼짐 — 축 읽기를 씀 · 켜면 직모 뼈대 안 씀 · 판정 없음)
-    evenRoots: true,     // D(2026-10-12g 다시 켬)
+    on: true,            // B·C
+    waveRaw: true,       // A: 웨이브
+    curlRaw: true,       // A(2026-10-12b): 고리 컬도 직모 뼈대 안 씀
+    evenRoots: false,    // D(2026-10-12b 기본 꺼짐)
     rootLow: 0.6,        // D: 보통 밀도의 이 비율 미만 칸은 손대지 않음(대머리·숱 적은 곳 후보 — 64번이 덩어리 크기로 가름)
     vox: 0.05,           // C: 흐름 칸(모델 단위 ≈ 1cm)
     revLen: 0.42,        // C: 뿌리에서 이 길이(≈ 8cm)까지 봄
@@ -72,12 +65,15 @@
   function isOrig() { try { return !!(W.ORIG_MQ && W.ORIG_MQ.on !== false && typeof W.ORIG_MQ.isOriginal === 'function' && W.ORIG_MQ.isOriginal()); } catch (e) { return false; } }
 
   /* ── A. 웨이브 사진은 직모 뼈대를 안 씀 ─────────────────────────────── */
+  function isWavePhoto() {
+    try { var ws = W.PHOTO_CURL && typeof W.PHOTO_CURL.waveShape === 'function' ? W.PHOTO_CURL.waveShape() : null; return ws ? { wave: !!ws.isWave, loop: ws.loop } : null; } catch (e) { return null; }
+  }
   if (G && typeof G.build === 'function') {
     var innerBuild = G.build, straight0 = G.straightCurly;
     G.build = function () {
       try {
         G.straightCurly = straight0;
-        ST.wave = RS.rawPath; if (RS.rawPath) G.straightCurly = false;
+        if (RS.waveRaw || RS.curlRaw) { var w = isWavePhoto(); ST.wave = w; if (w ? (w.wave ? RS.waveRaw : RS.curlRaw) : RS.curlRaw) G.straightCurly = false; }   // (2026-10-12b) 모양을 못 쟀어도(곱슬이면 컬) 읽은 길 그대로
       } catch (e) {}
       return innerBuild.apply(this, arguments);
     };
@@ -149,21 +145,15 @@
       var k3 = keyOf(Math.floor(g.r.x / RC), Math.floor(g.r.y / RC), Math.floor(g.r.z / RC)), b = cells.get(k3);
       if (!b) cells.set(k3, b = []); b.push(i); good++;
     }
-    var revIdx = []; for (i = 0; i < n; i++) if (info[i] && info[i].rev) revIdx.push(i);
     ST.built = { n: n, good: good, rev: rev, revRoot: revRoot, revFlip: revFlip, flipN: flipN, short: shortN, vox: flow.size, ms: Date.now() - t0 };
     try { console.log(TAG + ' 본보기 — 기른 가닥 ' + n + ' 중 ' + good + '개 · 거꾸로 자란 가닥 ' + rev + '(그중 42번이 위로 뒤집어 기른 것 ' + revFlip + '/' + flipN + ') · 짧게 막힌 가닥 ' + shortN + ' · ' + ST.built.ms + 'ms'); } catch (e) {}
-    return { m: m, arr: S, cells: cells, rev: revIdx };
+    return { m: m, arr: S, cells: cells };
   }
   function index() {
     var m = model(); if (!m || !m.strands || !m.strands.length) return null;
     if (!IDX || IDX.m !== m || IDX.arr !== m.strands) IDX = buildIndex(m);
     return IDX;
   }
-  // (2026-10-12g) 59번 결 표가 거꾸로 자란 가닥(더듬이)을 안 넣게 — 그 가닥들의 번호(Set)
-  RS.revOf = function (strands) {
-    if (!RS.on || !strands || !strands.length) return null;
-    try { var ix = (IDX && IDX.arr === strands) ? IDX : (IDX = buildIndex({ strands: strands })); IDX.m = model() && model().strands === strands ? model() : IDX.m; ST.revUsed = ix.rev.length; return new Set(ix.rev); } catch (e) { ST.err = '거꾸로 가닥: ' + (e && e.message || e); return null; }
-  };
   RS.reindex = function () { IDX = null; return index() ? ST.built : null; };
 
   function nearest(ix, p) {
@@ -202,7 +192,7 @@
 
   var prevAdj = W.adjustStrandGeom;
   if (typeof prevAdj === 'function') W.adjustStrandGeom = function (s, lenOverride, styOverride) {
-    if (RS.on && RS.transplant && s && s.mannequin && s.pts && s.pts.length >= 2 && isOrig()) {
+    if (RS.on && s && s.mannequin && s.pts && s.pts.length >= 2 && isOrig()) {
       try {
         var ix = index();
         if (ix) {
@@ -232,7 +222,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { if (RS.on && RS.transplant && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0); } } catch (e) {}
+    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0); } } catch (e) {}
     return s;
   };
 
@@ -263,13 +253,13 @@
   RS.lines = function () {
     var b = ST.built, w = ST.wave, ro = ST.roots;
     return [TAG + ' ' + (RS.on ? '켜짐' : '꺼짐') +
-      ' · 축: ' + (RS.rawPath ? '걸은 길 그대로(rawPath)' : '축 읽기(42번 뼈대) + 결 표') + ' · 결 표에서 뺀 거꾸로 자란 가닥 ' + (ST.revUsed || 0) +
-      (RS.transplant ? ' · 옮겨심은 마네킹 가닥 ' + ST.used + ' / 예전 경로 ' + ST.fell : ' · 옮겨심기 꺼짐(마네킹)') +
+      ' · 웨이브·컬 직모 뼈대 안 씀: ' + (!RS.waveRaw && !RS.curlRaw ? '꺼짐' : w ? (w.wave ? '웨이브(고리 ' + (+w.loop).toFixed(2) + ')' : '고리 컬(고리 ' + (+w.loop).toFixed(2) + ')') + ((w.wave ? RS.waveRaw : RS.curlRaw) ? ' → 읽은 길 그대로' : ' → 예전대로(뼈대)') : '아직') +
+      ' · 옮겨심은 마네킹 가닥 ' + ST.used + ' / 본보기 못 찾아 예전 경로 ' + ST.fell + (ST.curlAdd ? ' · 컬 더 감은 가닥 ' + ST.curlAdd : '') +
       (b ? '\n  본보기: 기른 가닥 ' + b.n + ' 중 ' + b.good + ' · 거꾸로 자란 가닥 ' + b.rev + '(42번이 위로 뒤집은 ' + b.flipN + ' 중 ' + b.revFlip + ') · 짧게 막힌 ' + b.short + ' · ' + b.ms + 'ms' : '') +
       (ro ? '\n  뿌리 고르게: 보통 밀도 ' + ro.base + ' · 올린 칸 ' + ro.up + ' · 내린 칸 ' + ro.down + ' · 남긴 칸 ' + ro.left : '') +
       (ST.err ? ' · ⚠ ' + ST.err : '')];
   };
   var ppl = W.perfPanelLines;
   if (typeof ppl === 'function') W.perfPanelLines = function () { var L = ppl.apply(this, arguments) || []; try { L = L.concat(RS.lines()); } catch (e) {} return L; };
-  console.log(TAG + ' 설치 — 거꾸로 자란 가닥(더듬이)은 결 표에서 빼고 이웃 칸 결로 · 뿌리 고르게 · 원본 = 마네킹(곡선은 61번 ③). 끄기 READ_SHAPE.on / evenRoots = false · 옮겨심기 transplant=true · 걸은 길 rawPath=true');
+  console.log(TAG + ' 설치 — 원본 머리 = 방향필터로 읽은 가닥 모양을 마네킹 뿌리에 옮겨심음 · 웨이브·컬 모두 읽은 길 그대로 · 거꾸로 자란 가닥(더듬이)은 본보기에서 빼고 이웃 모양으로. 끄기 READ_SHAPE.on / waveRaw / curlRaw = false · 뿌리 고르게 켜기 evenRoots=true');
 })();

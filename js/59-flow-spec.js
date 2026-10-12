@@ -171,10 +171,8 @@
     cfg = cfg || FS;
     var cs = cfg.cs, bin = cfg.bin, NBmax = cfg.maxBins | 0, n = strands.length, recs = [], cells = new Map(), si, i;
     var ia = 1 / E.a, ib = 1 / E.b, ic = 1 / E.c, maxLen = 0, A1 = cfg.early, A2 = cfg.mid, A3 = cfg.late;
-    var revSet = null; try { if (window.READ_SHAPE && typeof READ_SHAPE.revOf === 'function') revSet = READ_SHAPE.revOf(strands); } catch (eR) { revSet = null; }   // (2026-10-12g) 거꾸로 자란 가닥(더듬이)은 표에 안 넣음 — 누르지 않고 그 뿌리는 이웃 칸의 결을 따름(68번)
     for (si = 0; si < n; si++) {
       var p = strands[si] && strands[si].pts; if (!p || p.length < 3) continue;
-      if (revSet && revSet.has(si)) continue;
       var m = p.length, N = new Float32Array(m * 3);
       for (i = 0; i < m; i++) { N[i * 3] = p[i].x * ia; N[i * 3 + 1] = (p[i].y - CY) * ib; N[i * 3 + 2] = p[i].z * ic; }
       var rl = Math.sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]); if (!(rl > 0.2)) continue;

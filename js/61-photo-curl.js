@@ -304,10 +304,7 @@
   PC.mq = true; PC.mqVolCut = true; PC.mqVolKeepCm = 1; PC.mqWind = 999; PC.mqRootLeave = 1; PC.mqStretch = true;
   var mqMemo = { key: '', wave: null, pt: null, remain: 1, r: null, P: null }, mqS = PC.mqStats = { calls: 0, solved: '' };
   function origSpec() {
-    try { var OM = W.ORIG_MQ; if (!OM || !OM.on || !mqOn() || typeof OM.isOriginal !== 'function' || !OM.isOriginal()) return null; var sp = OM.spec, pm = sp && sp.perm; if (!pm) return null;
-      if (pm.curl >= PC.lookMinCurl && pm.rCm > 0) return pm;
-      if (PC.shapeAll && pm.curl > 0) { var ws0 = waveShape(); if (ws0 && ws0.lamCm > 0 && ws0.ampCm > 0) return pm; }   // (2026-10-12g) 컬 값이 낮아도 사진 선이 있으면 그 모양대로(문턱 없음)
-      return null; } catch (e) { return null; }
+    try { var OM = W.ORIG_MQ; if (!OM || !OM.on || !mqOn() || typeof OM.isOriginal !== 'function' || !OM.isOriginal()) return null; var sp = OM.spec, pm = sp && sp.perm; return (pm && pm.curl >= PC.lookMinCurl && pm.rCm > 0) ? pm : null; } catch (e) { return null; }
   }
   function engineOn(C, w, pt) {                // 직선 30cm 가닥에 엔진을 돌려 반경·간격·남는 비율을 잼
     var CB = CURL_BUNDLE, cm = CB.cmPerUnit || 19.33, L = 30 / cm, n = 300, g = [], i, k, sv = {}, o = {}, p;
@@ -346,7 +343,7 @@
    *  사진 4장의 선: 고리 정도(0=S자 · 1=고리) · 파장 · 진폭 → 고리 정도 waveLoopMax 미만이면 웨이브.
    *  물결: 축(마네킹 가닥)을 따라 진폭 × sin(2π·호길이/파장 + 위상) 만큼 옆(두상 면에 나란한 방향)으로 흔듦. 뿌리 waveRootCm는 서서히.
    *  위상은 2cm 칸마다 같게(한 타래가 같이 출렁임) · 겉 길이 = 축 길이(스펙 길이). */
-  PC.waveMode = false; /* (2026-10-12g) 판정 없앰 — waveStrand는 안 씀 */ PC.waveRootCm = 2; PC.waveLockCm = 2; PC.waveJitter = 0.35;
+  PC.waveMode = true; PC.waveLoopMax = 0.33; PC.waveRootCm = 2; PC.waveLockCm = 2; PC.waveJitter = 0.35;
   var wsMemo = { key: '', v: null };
   function waveShape() {
     var key = ''; try { key = (state._hair3Dneutral ? 1 : 0) + '|' + (G && G.model ? G.model.strands.length : 0); } catch (e) {}
@@ -362,9 +359,9 @@
     });
     function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : NaN; }
     var v = { loop: med(loops), lamCm: med(lams), ampCm: med(amps), views: views };
-    // (2026-10-12g) 웨이브/컬 판정(고리 정도 0.33 문턱) 없앰 — 사용자: "그 기준은 없애고, 방향필터에서 살린 컬을 다 살려야돼." 고리 정도는 ③에서 연속 값(S자 ↔ 나선 섞는 비율)으로만 씀
+    v.isWave = isFinite(v.loop) && v.loop < PC.waveLoopMax && v.lamCm > 1 && v.ampCm > 0.05;
     wsMemo = { key: key, v: v };
-    try { console.log(TAG + ' ② 사진 선 모양(판정 없음 · 연속 값) — 고리 정도 ' + (+v.loop).toFixed(2) + ' · 파장 ' + (+v.lamCm).toFixed(1) + 'cm · 진폭 ' + (+v.ampCm).toFixed(2) + 'cm · ' + views.join(' | ')); } catch (e) {}
+    try { console.log(TAG + ' ② 사진 선 모양 — ' + (v.isWave ? '웨이브(S자)' : '컬(고리)') + ' · 고리 정도 ' + (+v.loop).toFixed(2) + '(웨이브 기준 ' + PC.waveLoopMax + ' 미만) · 파장 ' + (+v.lamCm).toFixed(1) + 'cm · 진폭 ' + (+v.ampCm).toFixed(2) + 'cm · ' + views.join(' | ')); } catch (e) {}
     return v;
   }
   PC.waveShape = waveShape;
@@ -429,73 +426,11 @@
       A = rH ? (1 - w) * ws.ampCm + w * rH : ws.ampCm; L = pH ? (1 - w) * ws.lamCm + w * pH : ws.lamCm; src = '사진 선 + 나선 측정';
     } else if (rH && pH) { A = rH; L = pH; src = '나선 측정만'; }
     else return null;
-    var v = { A: A, L: L, w: w, depth: w, pm: pm };
+    var v = { A: A, L: L, w: w, depth: w };
     bsMemo = { key: key + '|' + (ws ? ws.loop : ''), v: v };
     mqS.shapeTxt = '고리 정도 ' + (ws ? (+ws.loop).toFixed(2) : '-') + ' · 가파름 ' + (ws ? (ws.ampCm / ws.lamCm).toFixed(3) : '-') + ' → 나선 쪽 ' + w.toFixed(2) + ' · 크기 ' + A.toFixed(2) + 'cm · 한 번 ' + L.toFixed(1) + 'cm · 앞뒤 굴곡 ×' + w.toFixed(2) + ' (' + src + ')';
     try { console.log(TAG + ' ③ 컬 모양(기준선 없음) — ' + mqS.shapeTxt); } catch (e) {}
     return v;
-  }
-  /* (2026-10-12g) 자리별 모양 — 사용자: "쓸 수 있는 정보 다 갖다 써야되는데 왜들 버리냐" · "4장 종합해서 해야지. 360도 들어오면 좀 더 받고"
-   *  66번이 사진마다 결을 따라 그은 선 하나하나(자리 · 곧음 · 고리 정도 · 파장 · 진폭)를 남김 → 3D 자리 p를 사진마다(42번 카메라) 비춰
-   *  그 둘레 localCm 안의 선들을 모음(가까울수록 무게). 사진 4장(360 세트면 그만큼)을 한꺼번에 — 한 장이 앞뒤 굴곡을 못 봐도 옆 사진의 선이 그 자리를 봄.
-   *    곧은 선 비율 → 그 자리 굴곡 크기를 그만큼 줄임(곧게 읽힌 자리는 곧게) · 고리 정도 · 파장 · 진폭 = 굽은 선들의 가중 평균(cm)
-   *  자리에 선이 없으면 사진 전체 값(②). 1cm 칸으로 기억해 둠. 끄기 PHOTO_CURL.localShape=false */
-  PC.localShape = true; PC.localCm = 3; PC.localMinW = 1.5;
-  var lfMemo = { key: '', views: null, cache: null, hit: 0, miss: 0, known: 0 };
-  function lineViews() {
-    var cams = G && G.cams, key = '';
-    try { key = (state._hair3Dneutral ? 1 : 0) + '|' + (cams ? cams.length : 0) + '|' + wsMemo.key; } catch (e) {}
-    if (lfMemo.key === key) return lfMemo.views;
-    var views = [];
-    if (cams && typeof G.camProj === 'function') cams.forEach(function (cam) {
-      try {
-        var id = state.hairMasks && state.hairMasks[cam.angle] && state.hairMasks[cam.angle].identity, ws = id && id.waveShape;
-        if (!ws || !ws.L || !ws.L.length) return;
-        var cpp = G.cmPerMaskPx ? G.cmPerMaskPx(cam.angle) : null; if (!(cpp > 0)) return;
-        var R = PC.localCm / cpp, B = new Map(), sx = (cam.mw && ws.w) ? ws.w / cam.mw : 1, sy = (cam.mh && ws.h) ? ws.h / cam.mh : sx;
-        ws.L.forEach(function (l) { var k = Math.floor(l[0] / R) * 65536 + Math.floor(l[1] / R), b = B.get(k); if (!b) B.set(k, b = []); b.push(l); });
-        views.push({ cam: cam, cpp: cpp, R: R, B: B, sx: sx, sy: sy, n: ws.L.length });
-      } catch (e) {}
-    });
-    lfMemo = { key: key, views: views, cache: new Map(), hit: 0, miss: 0, known: 0 };
-    try { console.log(TAG + ' ③ 자리별 모양 — 사진 ' + views.length + '장의 선 ' + views.reduce(function (a, v) { return a + v.n; }, 0) + '개를 3D 자리로 모음(둘레 ' + PC.localCm + 'cm)'); } catch (e) {}
-    return views;
-  }
-  function localAt(p) {
-    if (!PC.localShape) return null;
-    var V = lineViews(); if (!V || !V.length) return null;
-    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, c = 1 / cpu, key = Math.floor(p.x / c) + ',' + Math.floor(p.y / c) + ',' + Math.floor(p.z / c);
-    if (lfMemo.cache.has(key)) { lfMemo.hit++; return lfMemo.cache.get(key); }
-    lfMemo.miss++;
-    var wAll = 0, wB = 0, sLoop = 0, sLam = 0, sAmp = 0, vi, a, b;
-    for (vi = 0; vi < V.length; vi++) {
-      var v = V[vi], o = G.camProj(v.cam, p), mx = o.ix * v.cam.kx * v.sx, my = o.iy * v.cam.ky * v.sy;
-      if (!(mx >= 0) || !(my >= 0)) continue;
-      var bx = Math.floor(mx / v.R), by = Math.floor(my / v.R);
-      for (a = -1; a <= 1; a++) for (b = -1; b <= 1; b++) {
-        var L = v.B.get((bx + a) * 65536 + by + b); if (!L) continue;
-        for (var t = 0; t < L.length; t++) {
-          var l = L[t], d = Math.hypot(l[0] - mx, l[1] - my) / v.R; if (d >= 1) continue;
-          var w = (1 - d) * (1 - d) * Math.min(3, Math.max(0.5, l[6] / 80)); wAll += w;
-          if (l[2] || !isFinite(l[4]) || !isFinite(l[5])) continue;
-          wB += w; sLoop += w * l[3]; sLam += w * l[4] * v.cpp; sAmp += w * l[5] * v.cpp;
-        }
-      }
-    }
-    var r = null;
-    if (wAll >= PC.localMinW) { r = { bent: wB / wAll, loop: wB > 0 ? sLoop / wB : NaN, lamCm: wB > 0 ? sLam / wB : NaN, ampCm: wB > 0 ? sAmp / wB : NaN }; lfMemo.known++; }
-    lfMemo.cache.set(key, r);
-    return r;
-  }
-  PC.localAt = localAt;
-  // 한 자리의 모양: 사진 선(자리별 → 없으면 전체) + 나선 측정(42번 반경·한 바퀴)을 고리 정도·가파름으로 섞음 — blendShape와 같은 식
-  function mixAt(base, loc, pm) {
-    if (!loc || !(loc.bent > 0) || !isFinite(loc.loop) || !(loc.lamCm > 0) || !(loc.ampCm > 0)) return loc && loc.bent === 0 ? { A: 0, L: base.L, depth: base.depth } : base;
-    function cl(x) { return Math.max(0, Math.min(1, x)); }
-    var rH = pm && pm.rCm > 0 ? pm.rCm * PC.radiusK : null, pH = pm && pm.pitchCm > 0 ? pm.pitchCm : (rH ? rH * 2 : null);
-    var w = (cl((loc.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])) + cl((loc.ampCm / loc.lamCm - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]))) / 2;
-    var A = rH ? (1 - w) * loc.ampCm + w * rH : loc.ampCm, Lc = pH ? (1 - w) * loc.lamCm + w * pH : loc.lamCm;
-    return { A: A * loc.bent, L: Lc, depth: w };
   }
   function smoothPhase(r0) {                                              // 자리에 따라 부드럽게 바뀌는 위상(파장 phaseWaveCm)
     var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / (PC.phaseWaveCm / cpu);
@@ -507,8 +442,6 @@
     var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
     var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
     var ph = smoothPhase(g[0]), ds = Math.min(Lu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0;
-    var pmL = SH.pm || null, useL = PC.localShape && lineViews() && lfMemo.views.length, cur = { A: SH.A, L: SH.L, depth: SH.depth }, nxt = cur, every = Math.max(1, Math.round((1 / cpu) / ds)), sPrev = 0;
-    if (useL) { lfMemo.strands = (lfMemo.strands || 0) + 1; }
     var RW = readField(SH, cpu), fo = RW ? { x: 0, y: 0, z: 0, a: 0, k: 0 } : null, fill, rx, ry, rz;
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
@@ -519,9 +452,7 @@
       var ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
       var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
       var wr = Math.min(1, s / Math.max(1e-6, ru)); wr = wr * wr * (3 - 2 * wr);
-      if (useL && i % every === 0) { nxt = mixAt(SH, localAt({ x: px, y: py, z: pz }), pmL); }
-      if (useL) { var kk = 0.35; cur = { A: cur.A + (nxt.A - cur.A) * kk, L: cur.L + (nxt.L - cur.L) * kk, depth: cur.depth + (nxt.depth - cur.depth) * kk }; Au = cur.A / cpu; ph += 2 * Math.PI * (s - sPrev) * (1 / Math.max(1e-6, cur.L / cpu) - 1 / Lu); sPrev = s; }   // 파장이 자리마다 달라도 위상은 이어지게(적분)
-      var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * (useL ? cur.depth : SH.depth) * Math.sin(t);
+      var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * SH.depth * Math.sin(t);
       fill = 1; rx = ry = rz = 0;
       if (RW) {
         RW.wf.at(px, py, pz, fo); rx = RW.gain * fo.x; ry = RW.gain * fo.y; rz = RW.gain * fo.z;
@@ -566,6 +497,7 @@
       var SH = blendShape(pm);
       if (SH) { mqS.shaped = (mqS.shaped || 0) + 1; return pushIn(shapeStrand(axis0, SH), axis0); }
     }
+    if (PC.waveMode) { var WS = waveShape(); if (WS && WS.isWave) { mqS.wave = (mqS.wave || 0) + 1; return pushIn(waveStrand(axis0, WS.ampCm, WS.lamCm), axis0); } }
     for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
     args[2] = M.wave / 100;
     if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(args[0], 1 / M.remain); } catch (e) {} }
@@ -592,25 +524,11 @@
       try { return innerCurl.apply(this, arguments); } finally { for (k in sv) CB[k] = sv[k]; }
     };
   } else console.warn(TAG + ' curlStrand3D가 없어 뭉침 모양은 못 겁니다');
-  /* (2026-10-12g) 스펙 컬이 0이라 컬 엔진을 안 부르는 원본(웨이브 손님 '컬 0 · 웨이브 50')도 사진 선 모양을 얹음 — 예전에는 아무 굴곡도 안 들어가 웨이브가 약했음.
-   *  마네킹 가닥(결 표 · 스펙 길이 · 넘김 · 볼륨이 다 걸린 뒤) = 축 → ③ 식(자리별)으로 굴곡. 컬 엔진을 탄 가닥은 건너뜀(두 번 안 감음). 끄기 PHOTO_CURL.shapeAll=false */
-  PC.shapeAll = true; mqS.post = 0;
-  var innerAdj2 = W.adjustStrandGeom;
-  if (typeof innerAdj2 === 'function') W.adjustStrandGeom = function (s) {
-    var c0 = mqS.shaped || 0, c1 = mqS.calls || 0, r = innerAdj2.apply(this, arguments);
-    try {
-      if (!PC.shapeAll || !PC.shapeMode || !s || !s.mannequin || !r || r.length < 3 || (mqS.shaped || 0) !== c0 || (mqS.calls || 0) !== c1) return r;
-      var OM = W.ORIG_MQ; if (!OM || !OM.on || !mqOn() || typeof OM.isOriginal !== 'function' || !OM.isOriginal()) return r;
-      var pm = (OM.spec && OM.spec.perm) || {}; if (pm.curl > 0) return r;   // 컬이 있으면 엔진 쪽(mqCurl)이 맡음
-      var SH = blendShape({ rCm: pm.rCm || 0, pitchCm: pm.pitchCm || 0 }); if (!SH) return r;
-      mqS.post++; return pushIn(shapeStrand(r, SH), r);
-    } catch (e) { S.err = '모양 얹기: ' + (e && e.message || e); return r; }
-  };
   // 서명 — 모양이 걸렸는지가 바뀌면 미리 만든 헤어도 다시
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, 'g' + (PC.shapeAll ? 1 : 0) + (PC.localShape ? 'L' + PC.localCm : ''), PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
@@ -623,7 +541,6 @@
       ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
     if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' · 좁은 덩어리 밖으로 부푼 점을 당겨 넣음 ' + (mqS.pushed || 0) + ' · 기준선 없이 감은 가닥 ' + (mqS.shaped || 0) + (mqS.shapeTxt ? '(' + mqS.shapeTxt + ')' : '') + ' (끄기 PHOTO_CURL.mqVolCut / mqPushIn / waveMode=false)');
-    L.push('   ③ 자리별 모양(사진 선 · 4장 종합): ' + (!PC.localShape ? '꺼짐' : (lfMemo.views ? '사진 ' + lfMemo.views.length + '장 · 아는 1cm 칸 ' + lfMemo.known + ' / 물어본 칸 ' + lfMemo.miss + ' · 얹은 가닥 ' + (lfMemo.strands || 0) : '아직')) + ' · 컬 0 원본에 얹은 가닥 ' + (mqS.post || 0) + (PC.shapeAll ? '' : '(꺼짐 PHOTO_CURL.shapeAll)'));
     L.push('   ⑤ 읽은 굴곡 그대로: ' + (!PC.readWave ? '꺼짐(켜기 = 주소 끝에 ?rw=1 · 콘솔 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh())' : (mqS.readPts > 0 ? '켜짐 — ' + mqS.readTxt + ' · 얹은 점 ' + mqS.readPts + '(굴곡 장이 아는 자리 ' + Math.round(mqS.readKnown / mqS.readPts * 100) + '%) · 지어낸 굴곡을 남긴 비율 평균 ' + Math.round(mqS.readFillSum / mqS.readPts * 100) + '% (끄기 ?rw=0)' : '켜짐 — 아직 안 걸림(곱슬·웨이브 원본 머리가 아니거나 굴곡 장이 없음)')));
     return L;
   };
