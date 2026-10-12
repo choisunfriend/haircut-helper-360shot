@@ -212,6 +212,7 @@
     straightCurly: true, straightMode: 'path', straightWinK: 1.0, straightCurlMin: 40, straightPitchK: 0.5, straightDHalfK: 4, straightRMinPx: 5, straightRMaxPx: 40,   // (2026-10-10s) 곱슬 사진은 큰 흐름만 따라 직모 뼈대로 기름(컬은 61·14c가 그 위에 얹음) — 반경 = 한 바퀴 간격 × K (못 쟀으면 dHalf × K) · 사진 px
     sliceMs: 60,        // (2026-10-12e) 30 → 60: 화면에 양보하는 횟수를 반으로(폰에서 쉬는 시간이 얼마인지는 아래 진단 줄 '일한 시간/쉰 시간'으로 확인)
     waveField: true, waveCellCm: 0.8, waveMinN: 3,   // (2026-10-12e) 읽은 굴곡 장 — 곱슬·웨이브 사진에서 '읽은 길 − 편 길'을 자리(칸)마다 모아 둠. 61번이 PHOTO_CURL.readWave일 때 마네킹 가닥에 그대로 얹음 · 안 만들기 waveField=false
+    axisGabor: true, axisK: 0.5, axisRMinPx: 4, axisRMaxPx: 60, axisWinK: 1.0,   // (2026-10-12j) 축 = 방향 필터 파장으로 고른 결을 따라 걸음(아래 설명) · 끄기 axisGabor=false
     measureShare: 1, measureFull: ['front', 'temple'],   // (2026-10-12e) 기른 가닥은 재는 용도뿐(원본 = 마네킹 + 스펙)이라 measureFull 밖의 섹션은 이 비율만 기름 · 전부 기르기 measureShare=1
     seed: 20261003
   }, W.REGROW || {});
@@ -390,6 +391,24 @@
           straightNote.push('창 ' + straightWinCm.toFixed(1) + 'cm(' + (pitchCs.length ? '잰 한 바퀴 ' + pitchCs.length + '장' : '어림') + ')');
         }
     } catch (e) { straightOn = false; }
+    /* (2026-10-12j) 축과 굴곡을 따로 — 사용자: "컬과 웨이브는 걸어간 길을 따라가면 근본적으로 문제가 생겨. 걷는 순간 벗어나기 때문에"
+     *  곱슬·웨이브 사진(방향 필터 선이 굽어 있음)은 결을 "그 사진에서 잰 파장 × axisK" 반경으로 고르게 한 뒤 걸음(직모 뼈대 field 방식) → 굴곡에서 벗어날 일이 없는 큰 흐름(퍼짐·어깨 앞 흐름은 남음).
+     *  편 길 창 = 방향 필터 파장 중앙값(예전: 잰 한 바퀴 — 웨이브 손님 11.3cm로 퍼짐까지 지움). 굴곡은 61번이 사진 선 값 그대로 얹음(68번 옮겨심기 뒤). */
+    try {
+      var WSg = (G.axisGabor && W.PHOTO_CURL && typeof W.PHOTO_CURL.waveShape === 'function') ? W.PHOTO_CURL.waveShape() : null;
+      if (WSg && WSg.nAll > 0 && isFinite(WSg.lamCm) && WSg.lamCm > 1) {
+        straightOn = true; straightNote = ['방향 필터 축'];
+        cams.forEach(function (cam) {
+          var mi = state.hairMasks && state.hairMasks[cam.angle], ws = mi && mi.identity && mi.identity.waveShape, lp = ws && ws.lamPx, cpp1 = 0;
+          try { cpp1 = cmPerMaskPx(cam.angle); } catch (e3) {}
+          if (!(lp > 0) && cpp1 > 0) lp = WSg.lamCm / cpp1;
+          var r = clampN((lp || 0) * G.axisK * (cam.iw / Math.max(1, (mi && (mi.maskW || mi.w)) || cam.iw)), G.axisRMinPx, G.axisRMaxPx);
+          cam.sR = r; straightNote.push(cam.angle + ' 반경 ' + r.toFixed(0) + 'px');
+        });
+        straightWinCm = clampN(WSg.lamCm * G.axisWinK, 1.5, 12);
+        straightNote.push('창 ' + straightWinCm.toFixed(1) + 'cm(방향 필터 파장)');
+      }
+    } catch (e) {}
     var nStraight = 0, straightShrink = [];
     var WFb = null;                                                       // (2026-10-12e) 읽은 굴곡 장 — 편 가닥이 있을 때만
     if (straightOn && straightWinCm > 0 && G.waveField !== false && G.waveCellCm > 0) {

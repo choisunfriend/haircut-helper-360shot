@@ -542,6 +542,11 @@
     return out;
   }
   PC.blendShape = blendShape; PC._shapeStrand = shapeStrand;
+  PC.applyShape = function (g) {                                         // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음
+    if (!PC.on || !PC.gaborAll || !g || g.length < 2) return g;
+    var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab) return g;
+    return shapeStrandAll(g, SH) || g;
+  };
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
   PC.mqPushIn = true; mqS.pushed = 0;
   function pushIn(res, axis) {

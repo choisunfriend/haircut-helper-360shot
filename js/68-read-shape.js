@@ -37,7 +37,7 @@
   var W = window, TAG = '[읽은 모양]';
   var RS = W.READ_SHAPE = Object.assign({
     on: true,            // B·C
-    waveRaw: true,       // A
+    waveRaw: false,      // A — (2026-10-12j) 끔: 웨이브도 42번 축(방향 필터 파장으로 고른 결)으로 걷고 굴곡은 61번이 얹음. 켜면 예전(읽은 길 그대로)
     evenRoots: true,     // D
     rootLow: 0.6,        // D: 보통 밀도의 이 비율 미만 칸은 손대지 않음(대머리·숱 적은 곳 후보 — 64번이 덩어리 크기로 가름)
     vox: 0.05,           // C: 흐름 칸(모델 단위 ≈ 1cm)
@@ -47,7 +47,8 @@
     shortK: 0.3,         // C: 이웃 뿌리 가닥 길이 중앙값의 이 비율 미만은 본보기 아님
     rootNbr: 0.06,       // C: 뿌리 이웃 칸(≈ 1.2cm · 둘레 27칸 ≈ 3.5cm 안의 뿌리들이 기준)
     rootCell: 0.04,      // B: 뿌리 찾기 칸(≈ 0.8cm)
-    reach: 4             // B: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
+    reach: 4,            // B
+    shape: true          // (2026-10-12j) 옮겨심은 축에 61번 굴곡(방향 필터 선 그대로)을 얹음 · false = 축만: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
   }, W.READ_SHAPE || {});
   var ST = RS.stats = { built: null, used: 0, fell: 0, curlAdd: 0, wave: null, roots: null, err: null };
   var G = W.REGROW;
@@ -169,6 +170,7 @@
     var dlen = 50; try { dlen = SECTIONS[s.sec].defaults.length; } catch (e) {}
     var r = sectionLengthRatio(s.sec, typeof lenOverride === 'number' ? lenOverride : cur.length) / (sectionLengthRatio(s.sec, dlen) || 1);
     if (isFinite(r) && Math.abs(r - 1) > 1e-6) g = lengthStrand3D(g, r);
+    if (RS.shape) { try { var PCx = W.PHOTO_CURL; if (PCx && typeof PCx.applyShape === 'function') { var g2 = PCx.applyShape(g); if (g2 && g2 !== g) { g = g2; ST.shaped = (ST.shaped || 0) + 1; } } } catch (e) {} }   // (2026-10-12j) 옮겨심은 축 위에 사진 선 굴곡
     var curl = Math.max(0, cur.curl || 0), C0 = base.curl || 0, dC = curl - C0;
     var sweep = Math.max(-100, Math.min(100, (sty.sweep || 0) - (base.sweep || 0)));
     var vol = Math.max(0, Math.min(100, 50 + ((typeof sty.volume === 'number' ? sty.volume : 50) - (typeof base.volume === 'number' ? base.volume : 50))));
@@ -215,7 +217,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0); } } catch (e) {}
+    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : ''); } } catch (e) {}
     return s;
   };
 
