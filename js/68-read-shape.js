@@ -30,6 +30,12 @@
  *      64번 ③이 작은 덩어리는 채우고 넓고 빈 덩어리(대머리·숱 적은 곳)는 남김. → 앞이마 성긴 줄 · 그 위 밀집 띠가 없어짐.
  *   (가닥 수는 48번 adjustLow/High = 30000 · 42번 measureShare = 1로 같이 고침)
  *
+ * (2026-10-12b) 다시 올림 — 사용자: "웨이브를 방향 필터에서 제대로 읽어두고 그 뒤에 여러 번 바꿔버리고 있어. 있는 그대로 그려지게. 컬도 포함.
+ *   더듬이는 누르지 말고 반대방향으로 자란 가닥이니까 처리하는 규칙에 포함되도록."
+ *   · A를 컬에도 — 웨이브·고리 컬 모두 42번 직모 뼈대(①)를 안 씀. 기른 가닥 = 방향필터를 따라 걸은 길 그대로.
+ *     옮겨심은 원본 머리는 59번 표(②)·61번 지어낸 물결/컬(③)을 안 거치므로 컬을 두 번 감지 않음(슬라이더로 스펙보다 올린 만큼만 더 감음).
+ *   · C 그대로 — 더듬이(42번이 위로 뒤집어 기른 가닥 포함)는 눌러 펴지 않고 "거꾸로 자란 가닥"으로 봐서 본보기에서 빼고, 그 뿌리는 이웃의 바른 가닥 모양을 받음.
+ *   · D(뿌리 고르게)는 이번 요청이 아니라 기본 꺼짐(evenRoots=false) · 가닥 수(48·42번)는 손대지 않음.
  * 끄기: READ_SHAPE.on=false(B·C) · READ_SHAPE.waveRaw=false(A) · READ_SHAPE.evenRoots=false(D) — 바꾼 뒤 사진을 다시 분석하거나 마네킹을 켰다 끄기
  * ========================================================================== */
 (function () {
@@ -37,8 +43,9 @@
   var W = window, TAG = '[읽은 모양]';
   var RS = W.READ_SHAPE = Object.assign({
     on: true,            // B·C
-    waveRaw: true,       // A
-    evenRoots: true,     // D
+    waveRaw: true,       // A: 웨이브
+    curlRaw: true,       // A(2026-10-12b): 고리 컬도 직모 뼈대 안 씀
+    evenRoots: false,    // D(2026-10-12b 기본 꺼짐)
     rootLow: 0.6,        // D: 보통 밀도의 이 비율 미만 칸은 손대지 않음(대머리·숱 적은 곳 후보 — 64번이 덩어리 크기로 가름)
     vox: 0.05,           // C: 흐름 칸(모델 단위 ≈ 1cm)
     revLen: 0.42,        // C: 뿌리에서 이 길이(≈ 8cm)까지 봄
@@ -66,7 +73,7 @@
     G.build = function () {
       try {
         G.straightCurly = straight0;
-        if (RS.waveRaw) { var w = isWavePhoto(); ST.wave = w; if (w && w.wave) G.straightCurly = false; }
+        if (RS.waveRaw || RS.curlRaw) { var w = isWavePhoto(); ST.wave = w; if (w ? (w.wave ? RS.waveRaw : RS.curlRaw) : RS.curlRaw) G.straightCurly = false; }   // (2026-10-12b) 모양을 못 쟀어도(곱슬이면 컬) 읽은 길 그대로
       } catch (e) {}
       return innerBuild.apply(this, arguments);
     };
@@ -246,7 +253,7 @@
   RS.lines = function () {
     var b = ST.built, w = ST.wave, ro = ST.roots;
     return [TAG + ' ' + (RS.on ? '켜짐' : '꺼짐') +
-      ' · 웨이브 사진 직모 뼈대 안 씀: ' + (!RS.waveRaw ? '꺼짐' : w ? (w.wave ? '웨이브(고리 ' + (+w.loop).toFixed(2) + ') → 읽은 길 그대로' : '고리 컬이라 예전대로') : '아직') +
+      ' · 웨이브·컬 직모 뼈대 안 씀: ' + (!RS.waveRaw && !RS.curlRaw ? '꺼짐' : w ? (w.wave ? '웨이브(고리 ' + (+w.loop).toFixed(2) + ')' : '고리 컬(고리 ' + (+w.loop).toFixed(2) + ')') + ((w.wave ? RS.waveRaw : RS.curlRaw) ? ' → 읽은 길 그대로' : ' → 예전대로(뼈대)') : '아직') +
       ' · 옮겨심은 마네킹 가닥 ' + ST.used + ' / 본보기 못 찾아 예전 경로 ' + ST.fell + (ST.curlAdd ? ' · 컬 더 감은 가닥 ' + ST.curlAdd : '') +
       (b ? '\n  본보기: 기른 가닥 ' + b.n + ' 중 ' + b.good + ' · 거꾸로 자란 가닥 ' + b.rev + '(42번이 위로 뒤집은 ' + b.flipN + ' 중 ' + b.revFlip + ') · 짧게 막힌 ' + b.short + ' · ' + b.ms + 'ms' : '') +
       (ro ? '\n  뿌리 고르게: 보통 밀도 ' + ro.base + ' · 올린 칸 ' + ro.up + ' · 내린 칸 ' + ro.down + ' · 남긴 칸 ' + ro.left : '') +
@@ -254,5 +261,5 @@
   };
   var ppl = W.perfPanelLines;
   if (typeof ppl === 'function') W.perfPanelLines = function () { var L = ppl.apply(this, arguments) || []; try { L = L.concat(RS.lines()); } catch (e) {} return L; };
-  console.log(TAG + ' 설치 — 원본 머리 = 방향필터로 읽은 가닥 모양을 마네킹 뿌리에 옮겨심음 · 거꾸로 자란 가닥은 본보기에서 뺌 · 뿌리 고르게. 끄기 READ_SHAPE.on / waveRaw / evenRoots = false');
+  console.log(TAG + ' 설치 — 원본 머리 = 방향필터로 읽은 가닥 모양을 마네킹 뿌리에 옮겨심음 · 웨이브·컬 모두 읽은 길 그대로 · 거꾸로 자란 가닥(더듬이)은 본보기에서 빼고 이웃 모양으로. 끄기 READ_SHAPE.on / waveRaw / curlRaw = false · 뿌리 고르게 켜기 evenRoots=true');
 })();
