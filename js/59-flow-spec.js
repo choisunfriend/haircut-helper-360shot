@@ -152,6 +152,7 @@
     nativeWaitMs: 25000, // 다시 기르기를 이만큼 기다려도 안 끝나면 마네킹 방식으로 겁니다
     guardNeck: false,     // 걸을 때 목 기둥 속으로 들어가는 점은 밖으로(42번 neckPush)
     lenOwnOnly: true,    // (2026-10-12c) 가닥 길이 = 제 칸의 길이만(둘레 칸과 안 섞음) — 사용자: "왜 섞는거야? 그냥 가닥길이를 쓰면 안돼?" 머리선의 짧은 칸(짧게 심은·옆으로 눕힌 가닥)이 긴 이웃의 길이를 받아 제 방향 그대로 허공으로 뻗던 것(직모 손님 앞머리 가시 450가닥 → 0). 이웃 가닥과의 길이 차이는 그대로(중앙 0.49 → 0.50cm). false = 예전(섞음)
+    deadEnd: true, deadRatio: 0.3, deadRing: 7,   // (2026-10-12e) 머리 안쪽(둘레 8방향 중 deadRing 이상이 두 칸 밖까지 머리)인데 이웃 길이의 deadRatio배 미만인 무리는 표에서 뺌(더듬이) · 끄기 deadEnd=false
     lenOwnCap: 0,        // lenOwnOnly를 끄고 쓸 때: 제 칸 길이의 이 배까지만 이웃과 섞음 · 0 = 끔
     fidelityN: 2500      // 진단: 표로 다시 만들어 볼 원래 가닥 수
   }, W.FLOW_SPEC || {});
@@ -284,6 +285,43 @@
     var cmap = new Map(), ci, pi;
     out.forEach(function (c) { cmap.set(keyOf(c.ix, c.iy, c.iz), c); });
     function compat(a, b) { return 0.5 * (a.e[0] * b.e[0] + a.e[1] * b.e[1] + a.e[2] * b.e[2] + a.e2[0] * b.e2[0] + a.e2[1] * b.e2[1] + a.e2[2] * b.e2[2]); }
+    // (2026-10-12e) 머리 안쪽의 막다른 짧은 무리 빼기 — 둘레가 두 칸 밖까지 전부 머리인 자리(헤어라인이 아님)인데 길이가 이웃의 deadRatio배도 안 되는 무리.
+    //   실측(긴 웨이브·긴 직모): 정수리 앞쪽 가르마 위의 뿌리가 앞으로 걷다가 이마에서 앞 사진에 막혀 5cm쯤에서 끝남 → 마네킹에서 "더듬이"·앞으로 뻗는 가닥.
+    //   긴 머리 한가운데의 짧은 가닥은 사진에 보일 수 없는 것이라(긴 머리에 덮임) 읽은 것이 아니라 막힌 것으로 봅니다. 표에서 빼면 그 자리 뿌리는 가까운 이웃 칸의 결·길이를 따릅니다.
+    //   헤어라인의 짧은 칸(앞머리·잔머리)은 둘레에 빈 칸이 있어 안 걸립니다.
+    var nDead = 0;
+    if (cfg.deadEnd && cfg.deadRatio > 0) {
+      var ringOk = function (c, kk) {
+        var ux = (c.ix + 0.5) * cs, uy = (c.iy + 0.5) * cs, uz = (c.iz + 0.5) * cs, ul = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1, a8, n8 = 0;
+        ux /= ul; uy /= ul; uz /= ul;
+        var rx = Math.abs(uy) > 0.9 ? 1 : 0, ry = Math.abs(uy) > 0.9 ? 0 : 1, t1x = uy * 0 - uz * ry, t1y = uz * rx - ux * 0, t1z = ux * ry - uy * rx, tl = Math.sqrt(t1x * t1x + t1y * t1y + t1z * t1z) || 1;
+        t1x /= tl; t1y /= tl; t1z /= tl;
+        var t2x = uy * t1z - uz * t1y, t2y = uz * t1x - ux * t1z, t2z = ux * t1y - uy * t1x;
+        for (a8 = 0; a8 < 8; a8++) {
+          var ca8 = Math.cos(a8 * Math.PI / 4), sa8 = Math.sin(a8 * Math.PI / 4), px = ux + kk * cs * (ca8 * t1x + sa8 * t2x), py = uy + kk * cs * (ca8 * t1y + sa8 * t2y), pz = uz + kk * cs * (ca8 * t1z + sa8 * t2z), pl = Math.sqrt(px * px + py * py + pz * pz) || 1;
+          if (cmap.has(keyOf(Math.floor(px / pl / cs), Math.floor(py / pl / cs), Math.floor(pz / pl / cs)))) n8++;
+        }
+        return n8;
+      };
+      var deads = [];
+      out.forEach(function (c) {
+        var Ls = [], dx, dy, dz, nc, k;
+        for (dz = -1; dz <= 1; dz++) for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy && !dz) continue;
+          nc = cmap.get(keyOf(c.ix + dx, c.iy + dy, c.iz + dz)); if (!nc) continue;
+          for (k = 0; k < nc.cl.length; k++) Ls.push(nc.cl[k].L);
+        }
+        if (Ls.length < 6) return;
+        var med = qv(Ls, 0.5), hit = c.cl.filter(function (g) { return g.L < cfg.deadRatio * med; });
+        if (!hit.length) return;
+        if (ringOk(c, 1.3) < cfg.deadRing || ringOk(c, 2.6) < cfg.deadRing) return;
+        deads.push([c, hit]);
+      });
+      deads.forEach(function (u) {
+        var c = u[0]; c.cl = c.cl.filter(function (g) { if (u[1].indexOf(g) >= 0) { nDead++; nUsed -= g.core; return false; } return true; });
+        if (!c.cl.length) { cmap.delete(keyOf(c.ix, c.iy, c.iz)); out.splice(out.indexOf(c), 1); }
+      });
+    }
     // 혼자 긴 칸 누르기 — 같은 쪽으로 가는 이웃 무리들보다 훨씬 긴 칸은(다시 기르기가 밑단을 지나쳐 간 자리) 이웃 길이의 위쪽(75%) × tailCap으로.
     //   짧은 쪽(앞머리 등)은 그대로 둠
     var nTail = 0;
@@ -397,7 +435,7 @@
     }
     // 길이 분포(5자리)는 고른 길이 둘레의 좁은 띠로 — 가닥마다 ±lenVar만 다름
     out.forEach(function (c) { c.cl.forEach(function (g) { var v = cfg.lenVar; g.q = [g.L * (1 - v), g.L * (1 - v / 2), g.L, g.L * (1 + v / 2), g.L * (1 + v)]; }); });
-    return { cs: cs, bin: bin, nb: nb, cells: out, stats: { strands: recs.length, used: nUsed, cells: out.length, split: nSplit, skipped: nSkipCell, maxLen: maxLen, tailCells: nTail, mixed: nMixed, lone: nLone, small: nSmall } };
+    return { cs: cs, bin: bin, nb: nb, cells: out, stats: { strands: recs.length, used: nUsed, cells: out.length, split: nSplit, skipped: nSkipCell, maxLen: maxLen, tailCells: nTail, mixed: nMixed, lone: nLone, small: nSmall, dead: nDead } };
   }
 
   /* ------------------------------------------------------------------------------------------------------------
@@ -1110,6 +1148,7 @@
       L.push(TAG + ' 다시 기른 가닥 ' + s.strands + '개에서 뽑음(' + b.at + ' · ' + Math.round(b.ms) + 'ms) — 두피 칸 ' + s.cells + '개(가닥이 ' + FS.minCell + '개 미만이라 뺀 칸 ' + s.skipped + ') · 그중 두 무리로 가른 칸(가르마 등) ' + s.split + ' · 두 무리가 섞여 있어 큰 무리만 쓴 칸 ' + (s.mixed || 0) + ' · 혼자 다른 쪽으로 가서 이웃을 따르게 한 칸 ' + (s.lone || 0) +
         ' · 가닥이 적어(보통 칸의 ' + Math.round(FS.smallFrac * 100) + '% 미만) 큰 이웃의 결을 따르게 한 무리 ' + (s.small || 0) +
         ' · 표에 넣은 가닥(칸의 결과 같은 쪽으로 가는 몸통만) ' + s.used + '개(' + Math.round(s.used / Math.max(1, s.strands) * 100) + '% — 나머지는 잔머리·엇나간 가닥이라 뺌) · 혼자 길어서 누른 칸 ' + (s.tailCells || 0) +
+        ' · 머리 안쪽의 막다른 짧은 무리라 뺀 것 ' + (s.dead || 0) + '(이웃 칸을 따름 · 끄기 FLOW_SPEC.deadEnd=false)' +
         ' · 길이 칸 ' + b.nb + ' · 스펙에 싣는 크기 ' + Math.round(b.bytes / 1024) + 'KB');
       if (f && f.n) L.push('    표로 다시 만든 가닥 ↔ 원래 가닥(' + f.n + '개 표본 · 길이는 원래 길이로): 가닥 전체 평균 거리 ' + (f.meanMed * cm).toFixed(1) + 'cm(중앙값) · ' + (f.meanP90 * cm).toFixed(1) + 'cm(90%) | 끝 거리 ' +
         (f.tipMed * cm).toFixed(1) + ' · ' + (f.tipP90 * cm).toFixed(1) + 'cm' + (f.miss ? ' · 표가 없어 못 만든 가닥 ' + f.miss : '') +

@@ -210,12 +210,100 @@
     volume: true, volCellCm: 0.6, volTight: true, volTightMinCurl: 30,   // (2026-10-11d) 3D 머리 덩어리 — 사진 네 장(마주 보는 사진 규칙)으로 칸마다 머리/아님을 한 번 정해 두고, 걷기·61번(마네킹 위 컬의 축 길이)이 같은 덩어리를 씀
     polNbr: true,       // (2026-10-11d) 뿌리 결이 옆으로 흐릴 때 앞뒤 방향을 "가운데 선 바깥"이 아니라 이웃 뿌리들의 방향으로(남자분 가운데 가르마의 원인)
     straightCurly: true, straightMode: 'path', straightWinK: 1.0, straightCurlMin: 40, straightPitchK: 0.5, straightDHalfK: 4, straightRMinPx: 5, straightRMaxPx: 40,   // (2026-10-10s) 곱슬 사진은 큰 흐름만 따라 직모 뼈대로 기름(컬은 61·14c가 그 위에 얹음) — 반경 = 한 바퀴 간격 × K (못 쟀으면 dHalf × K) · 사진 px
-    sliceMs: 30,
+    sliceMs: 60,        // (2026-10-12e) 30 → 60: 화면에 양보하는 횟수를 반으로(폰에서 쉬는 시간이 얼마인지는 아래 진단 줄 '일한 시간/쉰 시간'으로 확인)
+    waveField: true, waveCellCm: 0.8, waveMinN: 3,   // (2026-10-12e) 읽은 굴곡 장 — 곱슬·웨이브 사진에서 '읽은 길 − 편 길'을 자리(칸)마다 모아 둠. 61번이 PHOTO_CURL.readWave일 때 마네킹 가닥에 그대로 얹음 · 안 만들기 waveField=false
+    measureShare: 0.5, measureFull: ['front', 'temple'],   // (2026-10-12e) 기른 가닥은 재는 용도뿐(원본 = 마네킹 + 스펙)이라 measureFull 밖의 섹션은 이 비율만 기름 · 전부 기르기 measureShare=1
     seed: 20261003
   }, W.REGROW || {});
   var S = G.stats = null;
 
   function now() { try { return performance.now(); } catch (e) { return Date.now(); } }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   * (2026-10-12e) 읽은 굴곡 장 — "읽은 결을 그대로 쓴다"의 그릇
+   *   곱슬·웨이브 사진은 뼈대를 펴서 기릅니다(직모 뼈대). 그때 버려지던 '읽은 길 − 편 길'(= 사진에서 읽은 굴곡)을 편 길의 자리(칸)마다 모읍니다.
+   *   굴곡은 가닥을 따라간 길이가 아니라 "자리"에 고정돼 있어서(옆 가닥과 마루가 나란함 — 타래) 결 표(길이 칸 평균)로는 지워지고, 자리 칸으로 모으면 남습니다.
+   *     D  = 칸에 든 가닥들의 벗어남 평균(벡터) — 이웃 가닥이 같이 굽은 자리만 남고, 제각각인 자리(못 읽은 컬)는 서로 지워져 0에 가까워짐
+   *     aC = 같이 굽은 크기(둘레 5칸에서 |ΣD| ÷ 표본 수 × √2) — "여기서 굴곡을 얼마나 읽었나"
+   *   make(칸 크기, 범위) → add(읽은 길, 편 길) … → finish() → at(p, out): out.x/y/z = D, out.a = aC, out.k = 아는 정도(0~1)
+   * ──────────────────────────────────────────────────────────────────────── */
+  function makeWaveField(cell, bx, win) {
+    var nx = Math.max(2, Math.ceil((bx.x1 - bx.x0) / cell)), ny = Math.max(2, Math.ceil((bx.y1 - bx.y0) / cell)), nz = Math.max(2, Math.ceil((bx.z1 - bx.z0) / cell)), NV = nx * ny * nz;
+    if (!(NV > 0) || NV > 4e6) return null;
+    var SX = new Float32Array(NV), SY = new Float32Array(NV), SZ = new Float32Array(NV), NN = new Float32Array(NV), nAdd = 0, nSmp = 0, minN = Math.max(1, G.waveMinN | 0);
+    function arcOf(p) { var a = new Float64Array(p.length), i; for (i = 1; i < p.length; i++) a[i] = a[i - 1] + Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y, p[i].z - p[i - 1].z); return a; }
+    var F = {
+      cell: cell, nx: nx, ny: ny, nz: nz, x0: bx.x0, y0: bx.y0, z0: bx.z0, known: 0, ampU: 0, cohMed: 0, strands: 0, samples: 0,
+      add: function (raw, str) {
+        if (!raw || !str || raw.length < 3 || str.length < 3) return;
+        var ar = arcOf(raw), as = arcOf(str), Lr = ar[raw.length - 1], Ls = as[str.length - 1]; if (!(Lr > 0) || !(Ls > cell)) return;
+        var ds = cell * 0.5, m = Math.ceil(Ls / ds), i, jr = 0, js = 0, t, tr, u, a, b, qx, qy, qz, ix, iy, iz, id;
+        var PXs = new Float32Array(m + 1), PYs = new Float32Array(m + 1), PZs = new Float32Array(m + 1), CX = new Float64Array(m + 2), CYs = new Float64Array(m + 2), CZ = new Float64Array(m + 2);
+        for (i = 0; i <= m; i++) {
+          t = Math.min(Ls, i * ds); tr = t / Ls * Lr;
+          while (js < str.length - 2 && as[js + 1] < t) js++;
+          while (jr < raw.length - 2 && ar[jr + 1] < tr) jr++;
+          a = str[js]; b = str[js + 1]; u = (t - as[js]) / Math.max(1e-12, as[js + 1] - as[js]); PXs[i] = a.x + (b.x - a.x) * u; PYs[i] = a.y + (b.y - a.y) * u; PZs[i] = a.z + (b.z - a.z) * u;
+          a = raw[jr]; b = raw[jr + 1]; u = (tr - ar[jr]) / Math.max(1e-12, ar[jr + 1] - ar[jr]); qx = a.x + (b.x - a.x) * u; qy = a.y + (b.y - a.y) * u; qz = a.z + (b.z - a.z) * u;
+          CX[i + 1] = CX[i] + (qx - PXs[i]); CYs[i + 1] = CYs[i] + (qy - PYs[i]); CZ[i + 1] = CZ[i] + (qz - PZs[i]);
+        }
+        // 굴곡만 남김 — 벗어남에서 한 바퀴 창(win) 평균을 뺌(편 길이 굽은 자리 안쪽으로 파고든 만큼 같은 큰 어긋남은 굴곡이 아님)
+        var h = win > 0 ? Math.max(1, Math.round(win / 2 / ds)) : 0, lo, hi, c, dx, dy, dz;
+        for (i = 1; i <= m; i++) {
+          dx = CX[i + 1] - CX[i]; dy = CYs[i + 1] - CYs[i]; dz = CZ[i + 1] - CZ[i];
+          if (h) { lo = Math.max(0, i - h); hi = Math.min(m, i + h); c = hi - lo + 1; dx -= (CX[hi + 1] - CX[lo]) / c; dy -= (CYs[hi + 1] - CYs[lo]) / c; dz -= (CZ[hi + 1] - CZ[lo]) / c; }
+          ix = Math.floor((PXs[i] - F.x0) / cell); iy = Math.floor((PYs[i] - F.y0) / cell); iz = Math.floor((PZs[i] - F.z0) / cell);
+          if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) continue;
+          id = ix + nx * (iy + ny * iz); SX[id] += dx; SY[id] += dy; SZ[id] += dz; NN[id] += 1; nSmp++;
+        }
+        nAdd++;
+      },
+      finish: function () {
+        var DX = new Float32Array(NV), DY = new Float32Array(NV), DZ = new Float32Array(NV), KN = new Uint8Array(NV), E1 = new Float32Array(NV), i, n;
+        for (i = 0; i < NV; i++) { n = NN[i]; if (n >= minN) { DX[i] = SX[i] / n; DY[i] = SY[i] / n; DZ[i] = SZ[i] / n; KN[i] = 1; F.known++; } if (n > 0) E1[i] = SX[i] * SX[i] + SY[i] * SY[i] + SZ[i] * SZ[i]; }
+        // 둘레 5칸 상자 평균(축마다 한 번씩) — E1 = |ΣD|² · N2 = n²
+        var N2 = new Float32Array(NV); for (i = 0; i < NV; i++) N2[i] = NN[i] * NN[i];
+        function box(A) {
+          var T = new Float32Array(NV), x, y, z, k, s2, c, st, len, ax, o, lim;
+          for (ax = 0; ax < 3; ax++) {
+            st = ax === 0 ? 1 : ax === 1 ? nx : nx * ny; len = ax === 0 ? nx : ax === 1 ? ny : nz;
+            for (o = 0; o < NV; o++) {
+              c = ax === 0 ? o % nx : ax === 1 ? ((o / nx) | 0) % ny : (o / (nx * ny)) | 0; s2 = 0;
+              for (k = -2; k <= 2; k++) { lim = c + k; if (lim < 0 || lim >= len) continue; s2 += A[o + k * st]; }
+              T[o] = s2;
+            }
+            A.set(T);
+          }
+          return A;
+        }
+        box(E1); box(N2);
+        var AC = new Float32Array(NV), amps = [];
+        for (i = 0; i < NV; i++) if (N2[i] > 0) { AC[i] = Math.sqrt(2 * E1[i] / N2[i]); if (KN[i]) amps.push(AC[i]); }
+        amps.sort(function (x, y) { return x - y; });
+        F.ampU = amps.length ? amps[amps.length >> 1] : 0; F.ampHi = amps.length ? amps[Math.floor(amps.length * 0.9)] : 0;
+        F.strands = nAdd; F.samples = nSmp; F.DX = DX; F.DY = DY; F.DZ = DZ; F.KN = KN; F.AC = AC;
+        SX = SY = SZ = NN = null;
+        return F;
+      },
+      /* 세 방향 선형 보간 — 모르는 칸은 0으로(가장자리에서 저절로 잦아듦) */
+      at: function (px, py, pz, out) {
+        var gx = (px - F.x0) / cell - 0.5, gy = (py - F.y0) / cell - 0.5, gz = (pz - F.z0) / cell - 0.5, x0 = Math.floor(gx), y0 = Math.floor(gy), z0 = Math.floor(gz), fx = gx - x0, fy = gy - y0, fz = gz - z0;
+        var k, dx, dy, dz, w, id, X = 0, Y = 0, Z = 0, A = 0, K = 0, xx, yy, zz;
+        for (k = 0; k < 8; k++) {
+          dx = k & 1; dy = (k >> 1) & 1; dz = (k >> 2) & 1; xx = x0 + dx; yy = y0 + dy; zz = z0 + dz;
+          if (xx < 0 || yy < 0 || zz < 0 || xx >= nx || yy >= ny || zz >= nz) continue;
+          id = xx + nx * (yy + ny * zz); if (!F.KN[id]) continue;
+          w = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz);
+          X += w * F.DX[id]; Y += w * F.DY[id]; Z += w * F.DZ[id]; A += w * F.AC[id]; K += w;
+        }
+        out.x = X; out.y = Y; out.z = Z; out.a = A; out.k = K; return out;
+      }
+    };
+    return F;
+  }
+  G._makeWaveField = makeWaveField;
+  /* 지금 사진의 굴곡 장(없으면 null) — 61번이 씀 */
+  G.waveField = function () { try { return (G.model && G.src === state._hair3Dneutral && G.model.waveField) || null; } catch (e) { return null; } };
   function q(a, f) { if (!a.length) return NaN; var b = a.slice().sort(function (x, y) { return x - y; }); return b[Math.min(b.length - 1, Math.floor(b.length * f))]; }
   function n1(v) { return isFinite(v) ? (Math.round(v * 10) / 10).toFixed(1) : '?'; }
 
@@ -303,6 +391,11 @@
         }
     } catch (e) { straightOn = false; }
     var nStraight = 0, straightShrink = [];
+    var WFb = null;                                                       // (2026-10-12e) 읽은 굴곡 장 — 편 가닥이 있을 때만
+    if (straightOn && straightWinCm > 0 && G.waveField !== false && G.waveCellCm > 0) {
+      try { var cmW = 18.6; try { cmW = modelCmPerUnit() || cmW; } catch (e3) {} var hw = Math.max(Eh.a, Eh.c) * 2.3;
+        WFb = makeWaveField(G.waveCellCm / cmW, { x0: -hw, x1: hw, z0: -hw, z1: hw, y0: yTop - 62 / cmW, y1: yTop + 3 / cmW }, straightWinCm / cmW); } catch (e) { WFb = null; }
+    }
     /* 걸어 간 길(사진 컬을 따라 구불구불)을 한 바퀴 창으로 평균 → 나선의 축 = 직모 뼈대. 뿌리는 그대로 · 창은 뿌리·끝에서 줄어듦 · 두피 속으로 들어간 점은 두피면으로 */
     function straightenPath(pts, Wu) {
       var n = pts.length, i, S = [0];
@@ -685,6 +778,21 @@
       wgt[i] = den * (areas ? areas[i] : 1); wTot += wgt[i];
     }
     if (!(wTot > 0)) return { err: '뿌리밀도가 전부 0' };
+    /* (2026-10-12e) 재는 용도로만 기를 때는 덜 기름 — 화면의 원본 머리는 마네킹 + 스펙(58번)이라 기른 가닥은 결 표·길이·두께를 재는 데만 씀.
+       실측(저장된 가닥을 솎아 결 표를 다시 만들어 비교 · 긴 웨이브·긴 직모): 앞·관자놀이는 그대로, 나머지 절반 → 표대로 만든 가닥의 차이 중앙값 0.1cm · 90% 0.3cm · 99% 1cm.
+       1/3은 정수리 막다른 무리 판정이 빠지는 경우가 있어 절반까지만. 58번이 꺼져 있으면(기른 가닥을 그대로 보여 줌) 전부 기름. */
+    var mShare = 1, kc = null;
+    try { if (G.measureShare > 0 && G.measureShare < 1 && W.ORIG_MQ && W.ORIG_MQ.on !== false) mShare = G.measureShare; } catch (e) { mShare = 1; }
+    if (mShare < 1) try {
+      kc = new Float32Array(NC); var keepSec = G.measureFull || [], rr, cc2, phC, thC, FC, secC;
+      for (i = 0; i < NC; i++) {
+        if (!wgt[i]) continue;
+        rr = i / NT | 0; cc2 = i % NT; phC = (rr + 0.5) / NP * Math.PI; thC = (cc2 + 0.5) / NT * 2 * Math.PI - Math.PI;
+        FC = { x: Es.a * Math.sin(phC) * Math.sin(thC), y: CY + Es.b * Math.cos(phC), z: Es.c * Math.sin(phC) * Math.cos(thC) };
+        secC = null; try { secC = resolveSection3D(FC, CY, Es.b); } catch (e) {}
+        kc[i] = keepSec.indexOf(secC || 'crown') >= 0 ? 1 : mShare;
+      }
+    } catch (e) { kc = null; mShare = 1; }
     // (2026-10-04d) 가닥 수 = 48번(STRAND_BUDGET.total · 기본 30,000). 없으면 예전처럼 사진 가닥 수.
     var total = (W.STRAND_BUDGET && W.STRAND_BUDGET.on !== false && W.STRAND_BUDGET.total > 0) ? W.STRAND_BUDGET.total : photo.strands.length;
 
@@ -880,6 +988,7 @@
       if (straightOn && straightWinCm > 0) {                              // (2026-10-10s) 곱슬 — 사진 컬을 뼈대에서 빼고 축만 남김
         var L0s = 0, L1s = 0, iS; for (iS = 1; iS < pts.length; iS++) L0s += Math.hypot(pts[iS].x - pts[iS - 1].x, pts[iS].y - pts[iS - 1].y, pts[iS].z - pts[iS - 1].z);
         var ptsS = straightenPath(straightenPath(pts, straightWinCm / cmU), straightWinCm / cmU);
+        if (ptsS !== pts && WFb) { try { WFb.add(pts, ptsS); } catch (e) {} }
         if (ptsS !== pts) { for (iS = 1; iS < ptsS.length; iS++) L1s += Math.hypot(ptsS[iS].x - ptsS[iS - 1].x, ptsS[iS].y - ptsS[iS - 1].y, ptsS[iS].z - ptsS[iS - 1].z); if (L0s > 0) straightShrink.push(L1s / L0s); pts = ptsS; nStraight++; }
       }
       if (bw >= 0.5 || hung) { try { pts._rgKeep = true; } catch (e) {} }  // 조정 단계의 "사진 영역 밖 다듬기"가 이 가닥을 다시 자르지 않게
@@ -908,7 +1017,7 @@
         if (!thickDone) { buildThickness(); thickDone = true; return 0.08; }
         while (cell < NC && now() - t < budget) {
           if (wgt[cell]) {
-            carry += wgt[cell] / wTot * total;
+            carry += wgt[cell] / wTot * total * (kc ? kc[cell] : 1);
             var nRoots = Math.floor(carry); carry -= nRoots;
             for (var j = 0; j < nRoots; j++) {
               var sdd = grow(cell);
@@ -940,7 +1049,7 @@
         var al = null; try { al = G.alignStrands(out, CY, alK); } catch (e) { console.warn(TAG + ' 결 정렬 실패(그대로 둠)', e); }
         var tv = []; for (var k = 0; k < NC; k++) if (known[k] === 1 && !offScalp(k)) tv.push(T[k] * cm);
         S = G.stats = {
-          ms: Math.round(now() - t0), n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
+          ms: Math.round(now() - t0), mShare: mShare, n: st.n, stub: st.stub, skipped: st.skipped, sec: st.sec,
           lenMed: q(st.len, 0.5) * cm, lenP90: q(st.len, 0.9) * cm, kinkMed: q(st.kink, 0.5), kinkP90: q(st.kink, 0.9),
           estPct: st.steps ? st.est / st.steps * 100 : 0, stopMask: st.stopMask, stopCap: st.stopCap, stopMax: st.stopMax, free: st.free, flipped: st.flipped, flipKept: st.flipKept || 0, flipSide: st.flipSide || 0, stubN: st.stub || 0, glossN: glossN, glossKeep: glossKeep, thinStop: st.thinStop || 0, sideEnd: st.sideEnd || 0,
           isLong: isLong, capTxt: Object.keys(cap).map(function (k) { return k + ' ' + n1(cap[k] * cm); }).join(' · '),
@@ -952,8 +1061,9 @@
           hang: !!hangTips, hangSrc: hangTips ? (hangTips === backTips ? '뒤 사진 가닥' : '전체 사진 가닥') : '', hangN: st.hangN, hangSteps: st.hangSteps, stopTip: st.stopTip,
           hangTipCm: hangTips ? [(yTop - q(hangTips, 0.75)) * cm, (yTop - q(hangTips, 0.25)) * cm] : null
         };
+        var WFf = null; try { if (WFb) { var tWf = now(); WFf = WFb.finish(); S.wf = { known: WFf.known, n: WFf.nx * WFf.ny * WFf.nz, ampCm: WFf.ampU * cm, ampHiCm: WFf.ampHi * cm, strands: WFf.strands, samples: WFf.samples, ms: Math.round(now() - tWf), cellCm: G.waveCellCm }; } } catch (e) { WFf = null; console.warn(TAG + ' 굴곡 장 만들기 실패(없이 진행)', e); }
         return { strands: out, viewCal: photo.viewCal, yTop: photo.yTop, CY: photo.CY, field: photo.field || null, occ: photo.occ || null,
-          grid: photo.grid, roots: photo.roots, mannequin: false, regrown: true, rgInfo: info };
+          grid: photo.grid, roots: photo.roots, mannequin: false, regrown: true, rgInfo: info, waveField: WFf };
       }
     };
   }
@@ -997,9 +1107,10 @@
     G.building = true; G.lastErr = null;
     var sub = null;
     try { if (typeof showAI === 'function') { showAI('뿌리부터 다시 기르는 중…', '0%'); sub = document.getElementById('aiOverlaySub'); } } catch (e) {}
+    var workMs = 0, slices = 0;
     (function tick() {
-      var f;
-      try { f = B.step(G.sliceMs); }
+      var f, tW = now();
+      try { f = B.step(G.sliceMs); workMs += now() - tW; slices++; }
       catch (e) {
         G.building = false; G.lastErr = String(e && e.message || e); G.failedFor = photo;
         console.warn(TAG + ' 기르다 실패 — 사진 가닥을 그대로 씁니다', e);
@@ -1009,7 +1120,9 @@
       if (sub) sub.textContent = Math.round(f * 100) + '%';
       if (f < 1) return setTimeout(tick, 0);
       var model = null;
+      var tF = now();
       try { model = B.finish(); } catch (e) { G.lastErr = String(e && e.message || e); }
+      try { if (G.stats) { G.stats.workMs = Math.round(workMs); G.stats.finMs = Math.round(now() - tF); G.stats.slices = slices; } } catch (e) {}
       G.building = false;
       try { if (typeof hideAI === 'function') hideAI(); } catch (x) {}
       if (!model || !model.strands.length || state._hair3Dneutral !== photo) {
@@ -1811,7 +1924,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     var s = G.stats, L = ['[다시 기르기] ' + (G.on ? '켜짐' : '꺼짐') + (G.building ? ' · 만드는 중' : '') + (G.model && G.src === state._hair3Dneutral ? ' · 모델 있음' : ' · 모델 없음') + (G.lastErr ? ' · ⚠ ' + G.lastErr : '')];
     if (!s) return L;
     var tot = s.n || 1, secs = Object.keys(s.sec).map(function (k) { return k + ' ' + Math.round(s.sec[k] / tot * 100) + '%'; }).join(' · ');
-    L.push('  가닥 ' + s.n + '개(사진에 머리가 없어 안 심은 뿌리 ' + s.skipped + ') · ' + s.ms + 'ms · 사진 ' + s.cams);
+    L.push('  가닥 ' + s.n + '개(사진에 머리가 없어 안 심은 뿌리 ' + s.skipped + ') · ' + s.ms + 'ms' + (s.workMs != null ? '(걷기에 일한 시간 ' + s.workMs + ' · 마무리 ' + s.finMs + ' · 사이사이 쉰 시간 ' + Math.max(0, s.ms - s.workMs - s.finMs) + ' — ' + s.slices + '번 나눠 함)' : '') + (s.mShare < 1 ? ' · 재는 용도라 ' + (G.measureFull || []).join('·') + ' 밖은 ' + Math.round(s.mShare * 100) + '%만 기름(전부 REGROW.measureShare=1)' : '') + ' · 사진 ' + s.cams);
     L.push('  뿌리 분포 — ' + secs);
     L.push('  길이 ' + n1(s.lenMed) + '/' + n1(s.lenP90) + 'cm(중앙값/p90) · 꺾임 ' + n1(s.kinkMed) + '°/' + n1(s.kinkP90) + '° · 결을 사진에서 못 읽고 이어 간 걸음 ' + n1(s.estPct) + '%');
     L.push('  길이 상한(' + (s.isLong ? '긴 머리 — 넉넉히' : '짧은 머리 — 섹션 중앙값×' + G.lenMul) + ') cm: ' + s.capTxt);
@@ -1826,6 +1939,7 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     L.push('  두피 밖 3D 방향(사진 두 장 이상의 결로 깊이까지): ' + (G.tri3D ? '켜짐 — 그렇게 정한 걸음 ' + (s.triN || 0) + '회 (끄기 REGROW.tri3D=false)' : '꺼짐'));
     L.push('  껍질(사진 교집합): ' + (s.hullV ? s.hullV + ' 중 그 자리를 마주 보는 사진이 머리 영역에서 ' + G.hullMarginCm + '(정면)·' + G.hullMarginSideCm + '(옆·뒤)cm 넘게 밖이라 덩어리 밖인 걸음(덩어리를 쓰면 다른 이유로 밖인 것도 포함) ' + (s.hullN || 0) + '회 — 다른 사진이 머리라고 해도 멈춤 (예전: 다수결 · 끄기 REGROW.hullViews=[])' : '안 씀(다수결)'));
     L.push('  직모 뼈대(곱슬 사진 · 큰 흐름만 따라 기름 · 컬은 그 위에 얹음): ' + (s.straight ? '켜짐 — ' + s.straight + ' (끄기 REGROW.straightCurly=false)' : '안 씀'));
+    if (s.wf) L.push('  읽은 굴곡 장(편 길에서 벗어난 만큼을 자리마다 모음): ' + s.wf.cellCm + 'cm 칸 ' + s.wf.n + '개 중 아는 칸 ' + s.wf.known + ' · 가닥 ' + s.wf.strands + '개(표본 ' + s.wf.samples + ') · 이웃과 같이 굽은 크기 중앙값 ' + (+s.wf.ampCm).toFixed(2) + 'cm / 위쪽 10% ' + (+s.wf.ampHiCm).toFixed(2) + 'cm · ' + s.wf.ms + 'ms (마네킹에 얹기 = 주소 끝에 ?rw=1 또는 PHOTO_CURL.readWave=true)');
     L.push('  결 정렬(기른 뒤): ' + (!s.align || !s.align.on ? '꺼짐' : s.align.skipped ? '곱슬머리라 안 함(잰 컬이 ' + G.alignCurlOff + ' 이상 · REGROW.alignCurlOff=0이면 컬과 무관하게 정렬)' : '켜짐' + (s.align.kMul < 0.999 ? '(컬이 있어 세기 ×' + s.align.kMul.toFixed(2) + ')' : '') + ' — 이웃 결에서 벗어나 돌린 가닥 ' + s.align.strands + '개(마디 ' + s.align.segs + '개 · 돌린 각 중앙값 ' + n1(s.align.rotMed) + '° / p90 ' + n1(s.align.rotP90) +
       '°) · 혼자 나간 꼬리 자름 ' + s.align.trimmed + '개(평균 ' + n1(s.align.trimCm) + 'cm) · 칸 ' + s.align.cells + ' · ' + s.align.ms + 'ms'));
     L.push('  목: ' + (G.neck ? '켜짐 — 목 안으로 들어가려던 걸음 ' + (s.neckPush || 0) + '회 밖으로 밀어냄' : '꺼짐'));
@@ -1849,5 +1963,5 @@ function helixMeasure(rgba,mask,W,H,angle,coh,opt){opt=opt||{};const n=opt.n||25
     return L;
   };
 
-  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261012d — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
+  console.log(TAG + ' 설치 — 마네킹 OFF = 다시 기른 원본 머리(+치수) · 마네킹 ON = 마네킹 모드. 콘솔: REGROW.lines().join("\\n") · REGROW.measureLines().join("\\n")' + (G.trace ? ' · 걸음 기록 켜짐(v20261012e — 내보내기에 실림 · 끄기 REGROW.trace=false)' : ' · 걸음 기록 꺼짐'));
 })();

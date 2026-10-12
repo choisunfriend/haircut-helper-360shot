@@ -392,6 +392,27 @@
    *  크기·간격은 w만큼 나선 측정(42번 반경·한 바퀴)에서, 1−w만큼 사진 선(진폭·파장)에서. 앞뒤(두상 바깥) 굴곡 = 크기 × w.
    *  사진 선이 없으면 나선 측정만(w=1). 위상은 뿌리 자리의 부드러운 함수(칸 경계 없음 — 두상 위 격자 줄 고침) + 가닥마다 조금. */
   PC.shapeMode = true; PC.shapeLoop = [0.15, 0.5]; PC.shapeSteep = [0.06, 0.15]; PC.shapeRootCm = 1.5; PC.phaseWaveCm = 7; PC.phaseJit = 0.5;
+  /* (2026-10-12e) 읽은 굴곡 그대로 — 42번이 모아 둔 '읽은 굴곡 장'을 원본 머리(마네킹 + 스펙) 가닥에 얹고, 지어낸 웨이브는 "못 읽은 만큼만" 채움
+       자리 p에서:  가닥 = 뼈대 + gain × D(p) + (1 − gain × aC(p) ÷ 잰 굴곡 크기) × 지어낸 굴곡
+         D = 그 자리에서 읽은 벗어남(이웃 가닥이 같이 굽은 것만 남음) · aC = 그 크기
+         gain = 잰 굴곡 크기(③) ÷ 읽은 굴곡의 크기(걸음이 넓어 읽은 굴곡이 실제보다 작게 잡히는 것을 사진 값으로 맞춤 · 1~readGainMax)
+       장이 모르는 자리(가닥이 안 지나간 곳)·못 읽은 자리(가닥마다 제각각 = 잔 컬)는 D ≈ 0 · aC ≈ 0 → 지금처럼 잰 값으로 지어낸 굴곡.
+       기본은 꺼짐 — 주소 끝에 ?rw=1 을 붙이거나 콘솔에서 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh() (같은 올림으로 켠 것·끈 것을 바로 비교) */
+  PC.readWave = false; PC.readGainMax = 2.5; PC.readFill = true;
+  try { var rwQ = /[?&]rw=([0-9.]+)/.exec(String(location.search || '')); if (rwQ) PC.readWave = +rwQ[1] > 0; } catch (e) {}
+  var rwMemo = { wf: null, gain: 1, lineU: 0 };
+  function readField(SH, cpu) {
+    if (!PC.readWave || !G || typeof G.waveField !== 'function') return null;
+    var wf = G.waveField(); if (!wf || !(wf.known > 0)) return null;
+    var lineCm = SH.A, lineU = lineCm / cpu;   // 목표 크기 = ③에서 정한 굴곡 크기(사진 선 진폭과 나선 반경을 섞은 값 — 지어낸 굴곡이 쓰는 것과 같은 값)
+    if (rwMemo.wf !== wf || rwMemo.lineU !== lineU) {
+      var g0 = wf.ampU > 1e-9 ? lineU / wf.ampU : 1; g0 = Math.max(1, Math.min(PC.readGainMax, g0));
+      rwMemo = { wf: wf, gain: g0, lineU: lineU };
+      mqS.readTxt = '잰 굴곡 크기 ' + lineCm.toFixed(2) + 'cm ÷ 읽은 굴곡 ' + (wf.ampU * cpu).toFixed(2) + 'cm → ×' + g0.toFixed(2); mqS.readPts = 0; mqS.readFillSum = 0; mqS.readKnown = 0;
+      try { console.log(TAG + ' ⑤ 읽은 굴곡 그대로 — ' + mqS.readTxt + ' · 아는 칸 ' + wf.known); } catch (e) {}
+    }
+    return rwMemo;
+  }
   var bsMemo = { key: '', v: null };
   function blendShape(pm) {
     var key = ''; try { key = [pm.rCm, pm.pitchCm, wsMemo.key].join('|'); } catch (e) {}
@@ -421,6 +442,7 @@
     var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
     var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
     var ph = smoothPhase(g[0]), ds = Math.min(Lu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0;
+    var RW = readField(SH, cpu), fo = RW ? { x: 0, y: 0, z: 0, a: 0, k: 0 } : null, fill, rx, ry, rz;
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
       var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], b = g[j + 1];
@@ -431,11 +453,17 @@
       var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
       var wr = Math.min(1, s / Math.max(1e-6, ru)); wr = wr * wr * (3 - 2 * wr);
       var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * SH.depth * Math.sin(t);
-      out.push({ x: px + bx * c1 + ox * c2, y: py + by * c1 + oy * c2, z: pz + bz * c1 + oz * c2 });
+      fill = 1; rx = ry = rz = 0;
+      if (RW) {
+        RW.wf.at(px, py, pz, fo); rx = RW.gain * fo.x; ry = RW.gain * fo.y; rz = RW.gain * fo.z;
+        if (PC.readFill) fill = Math.max(0, Math.min(1, 1 - RW.gain * fo.a / Math.max(1e-9, RW.lineU)));
+        mqS.readPts++; mqS.readFillSum += fill; if (fo.k > 0.5) mqS.readKnown++;
+      }
+      out.push({ x: px + rx + fill * (bx * c1 + ox * c2), y: py + ry + fill * (by * c1 + oy * c2), z: pz + rz + fill * (bz * c1 + oz * c2) });
     }
     return out;
   }
-  PC.blendShape = blendShape;
+  PC.blendShape = blendShape; PC._shapeStrand = shapeStrand;
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
   PC.mqPushIn = true; mqS.pushed = 0;
   function pushIn(res, axis) {
@@ -500,7 +528,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
@@ -513,6 +541,7 @@
       ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
     if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' · 좁은 덩어리 밖으로 부푼 점을 당겨 넣음 ' + (mqS.pushed || 0) + ' · 기준선 없이 감은 가닥 ' + (mqS.shaped || 0) + (mqS.shapeTxt ? '(' + mqS.shapeTxt + ')' : '') + ' (끄기 PHOTO_CURL.mqVolCut / mqPushIn / waveMode=false)');
+    L.push('   ⑤ 읽은 굴곡 그대로: ' + (!PC.readWave ? '꺼짐(켜기 = 주소 끝에 ?rw=1 · 콘솔 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh())' : (mqS.readPts > 0 ? '켜짐 — ' + mqS.readTxt + ' · 얹은 점 ' + mqS.readPts + '(굴곡 장이 아는 자리 ' + Math.round(mqS.readKnown / mqS.readPts * 100) + '%) · 지어낸 굴곡을 남긴 비율 평균 ' + Math.round(mqS.readFillSum / mqS.readPts * 100) + '% (끄기 ?rw=0)' : '켜짐 — 아직 안 걸림(곱슬·웨이브 원본 머리가 아니거나 굴곡 장이 없음)')));
     return L;
   };
   var ppl = W.perfPanelLines;
@@ -529,5 +558,5 @@
     try { if (typeof ADJ_CACHE !== 'undefined' && ADJ_CACHE.bump) ADJ_CACHE.bump(); } catch (e) {}
     try { if (typeof renderAdjustFrame === 'function') renderAdjustFrame(); } catch (e) {}
   };
-  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261011f · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
+  console.log(TAG + ' 설치 — 곱슬 원본 머리의 컬 굵기를 사진에서 잰 반경에 맞추고(웨이브), 가닥이 다발로 같이 감기게 합니다(v20261012e · 사진 타래 조각으로 묶기 · 조각마다 크기 · ④ 원본 = 마네킹 + 잰 반경·간격으로 감기). 끄기 PHOTO_CURL.on=false 후 마네킹을 켰다 끄기 · 굵기 보정 PHOTO_CURL.radiusK');
 })();
