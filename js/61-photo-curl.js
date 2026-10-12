@@ -516,17 +516,37 @@
     }
     return out;
   }
-  function shapeStrandAll(g, SH) {
-    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, PF = profileFor(g[0], SH); if (!PF) return null;
+  /* (2026-10-12q) 컬 타래 — 사용자: "컬이 철사가 됐어. 가닥끼리 모여서 타래가 되면 좋을텐데"
+   *  컬(나선 쪽 lockW 이상)이면 뿌리를 "컬 지름 × lockDiaAsIs" 칸으로 묶어 한 칸 = 한 타래: 같은 사진 선(파장·진폭) · 같은 위상 · 같은 감는 면으로 감음(가닥마다 위상만 lockJit 조금).
+   *  68번이 같은 칸의 가닥들을 그 칸 대표 길(본보기 하나)로 모음 → 축이 나란해서 같이 감겨 타래가 됨. 끄기 PHOTO_CURL.lockMode=false */
+  /* (2026-10-12s) 타래 = 사진에서 읽은 타래 조각(42번 clumpsFor) — 사용자: "묶도록 짜는 게 아니고, 결을 읽을 때 그렇게 읽어야" · 격자 칸(12q)은 뺌
+   *  68번이 기른 가닥마다 그 가닥이 지나간 사진 조각(clumpOfPath · 10/10m과 같은 투표)을 붙여 두고, 옮겨심을 때 넘겨줌(LK).
+   *  같은 조각 = 같은 사진 선 · 같은 위상 · 같은 감는 면 · 컬 크기 = 그 조각에서 잰 반경 · 조각에 안 걸린 가닥은 제 뿌리 그대로(묶지 않음). 끄기 PHOTO_CURL.lockMode=false */
+  PC.lockMode = true; PC.lockW = 0.6; PC.lockJit = 0.35; PC.lockRFromClump = true;
+  var ckPhoto = null;
+  PC.clumpOfPath = function (p) {
+    try {
+      if (!p || p.length < 4) return null;
+      var ph = state._hair3Dneutral; if (ckPhoto !== ph) { prepClumps(); ckPhoto = ph; }
+      if (!CK) return null;
+      var k = clumpKey(p); if (!k) return null;
+      return { key: k, rCm: clumpRcm(k) };
+    } catch (e) { return null; }
+  };
+  PC.lockOn = function () { try { var SH = blendShape(origSpec() || {}); return !!(PC.lockMode && SH && SH.w >= PC.lockW); } catch (e) { return false; } };
+  function shapeStrandAll(g, SH, LKin) {
+    var LK = (LKin && PC.lockMode && SH.w >= PC.lockW) ? LKin : null, rP = LK ? { x: (LK.key % 997) * 0.0131, y: Math.floor(LK.key / 997) * 0.0173, z: (LK.key % 31) * 0.0217 } : g[0];
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, PF = profileFor(rP, SH); if (!PF) return null;
     var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
     var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
     var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
     var nb = PF.A.length, w = SH.w, useH = PC.gaborPitchFromHelix && SH.pH > 0, Lmin = 1e9, b;
+    if (LK && PC.lockRFromClump && LK.rCm > 0) for (b = 0; b < nb; b++) if (PF.A[b] > 0) PF.A[b] = LK.rCm;   // 그 조각에서 잰 컬 반경
     for (b = 0; b < nb; b++) { PF.L[b] = useH ? (1 - w) * PF.L[b] + w * SH.pH : PF.L[b]; if (PF.L[b] < Lmin) Lmin = PF.L[b]; }
-    var r0 = g[0], phi = 2 * Math.PI * hash3(r0.x * 13.7, r0.y * 71.3, r0.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
+    var r0 = g[0], phi = 2 * Math.PI * hash3(rP.x * 13.7, rP.y * 71.3, rP.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
     var Am = 0, An = 0; for (b = 0; b < nb; b++) if (PF.A[b] > 0) { Am += PF.A[b]; An++; } Am = An ? Am / An : SH.A;
     var lockCm = Math.max(PC.lockMinCmAsIs, PC.lockDiaAsIs * 2 * Am);   // (2026-10-12m) 한 타래 크기 = 컬 지름 × lockDiaAsIs — 예전 7cm 칸이 통째로 같은 위상이라 한 고리에 가닥이 너무 많았음
-    var t = smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    var t = LK ? 2 * Math.PI * hash3(rP.x * 41.3, rP.y * 17.9, rP.z * 63.1) + PC.lockJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5) : smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
       var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], bb = g[j + 1];
@@ -546,10 +566,10 @@
     return out;
   }
   PC.blendShape = blendShape; PC._shapeStrand = shapeStrand;
-  PC.applyShape = function (g) {                                         // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음
+  PC.applyShape = function (g, lk) {                                     // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음 · lk = 그 가닥의 사진 타래 조각
     if (!PC.on || !PC.gaborAll || !g || g.length < 2) return g;
     var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab) return g;
-    return shapeStrandAll(g, SH) || g;
+    return shapeStrandAll(g, SH, lk) || g;
   };
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
   PC.mqPushIn = true; mqS.pushed = 0;
@@ -618,7 +638,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs + (PC.lockMode ? 'L' + PC.lockW + ':' + PC.lockJit : '') : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {

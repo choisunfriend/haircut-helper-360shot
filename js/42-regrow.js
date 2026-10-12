@@ -184,8 +184,9 @@
     tapPx: 4,           // 머리 영역 판정 여유(800px 기준)
     gravity: 0.25,      // 두피 밖 구간에서 중력을 섞는 비율
     // (2026-10-04e) 뒷머리가 앞으로 쏠리는 것 막기 — 아래 backFix 설명 참고
-    backFix: true,      // (2026-10-11j) 다시 켬(사용자 선택 (가)) — 끄니 뒷머리가 몸통을 뚫고 앞으로 넘어옴(뒤 뿌리 → 몸 앞 1,278가닥). 몸통이 없는 동안은 이것이 뒷머리를 뒤에 둠
-    backFoldAfter: true, backFoldDropCm: 6, backFoldRampCm: 6, backFoldBw: 0.25,   // (2026-10-12d) 뒷머리를 뒤에 두는 것을 "읽은 뒤"에 함 — 사용자: "읽을 때 뺄 필요는 없거든? 렌더링까지는 읽어서 한 뒤 처리 과정에서 뒤로 넘기는 걸로" · "뒷머리에서 나온 가닥들을 결 정리하는 식으로". 걷는 동안에는 앞으로 가는 것을 안 막고(사진대로 끝까지 읽음), 다 읽은 가닥에서 어깨 높이(턱·목덜미 높이에서 backFoldDropCm 아래)부터 backFoldRampCm에 걸쳐 서서히 두피를 벗어난 자리의 깊이까지 뒤로 옮김 → 귀~어깨 사이 옆머리는 사진 그대로. backFoldBw: 뒤쪽 정도가 이 값 이상이면 온전히 넘김. false = 예전(걷는 동안 막음)
+    backFix: false,     // (2026-10-12r) 끔 — 사용자: "그거 꺼" (뒷머리 뒤로 넘기기 · 몸통에 자연스럽게 흘러내리기와 겹치면 안 됨) · 다시 켜기 REGROW.backFix=true
+    backFix_was: true,  // (2026-10-11j) 다시 켬(사용자 선택 (가)) — 끄니 뒷머리가 몸통을 뚫고 앞으로 넘어옴(뒤 뿌리 → 몸 앞 1,278가닥). 몸통이 없는 동안은 이것이 뒷머리를 뒤에 둠
+    backFoldAfter: true, backFoldFlat: false, backFoldDropCm: 6, backFoldRampCm: 6, backFoldBw: 0.25,   // (2026-10-12d) 뒷머리를 뒤에 두는 것을 "읽은 뒤"에 함 — 사용자: "읽을 때 뺄 필요는 없거든? 렌더링까지는 읽어서 한 뒤 처리 과정에서 뒤로 넘기는 걸로" · "뒷머리에서 나온 가닥들을 결 정리하는 식으로". 걷는 동안에는 앞으로 가는 것을 안 막고(사진대로 끝까지 읽음), 다 읽은 가닥에서 어깨 높이(턱·목덜미 높이에서 backFoldDropCm 아래)부터 backFoldRampCm에 걸쳐 서서히 두피를 벗어난 자리의 깊이까지 뒤로 옮김 → 귀~어깨 사이 옆머리는 사진 그대로. backFoldBw: 뒤쪽 정도가 이 값 이상이면 온전히 넘김. false = 예전(걷는 동안 막음)
     freeDepth: 0.6,     // 두피 밖 구간에서 사진 결이 지어낼 수 있는 깊이(카메라 쪽/반대쪽) 움직임 상한(가로·세로 움직임의 몇 배)
     backFrom: 0.1, backFull: 0.5,   // 두피를 벗어난 자리가 얼마나 뒤쪽인가(0 = 귀 옆 · 1 = 정뒤) — 이 구간에서 0→1로 막음
     // (2026-10-05k) 긴 머리는 목 아래에서 곧게 늘어뜨림 — 머리말 v6 참고
@@ -1017,10 +1018,14 @@
       if (G.backFix && G.backFoldAfter && free && bw > 0 && exitI >= 0 && pts.length > exitI + 1) {   // (2026-10-12d) 다 읽은 뒤: 뒤쪽에서 나온 가닥을 어깨 아래에서 뒤로 넘김(위는 읽은 그대로)
         var fK = Math.max(0, Math.min(1, bw / Math.max(1e-6, G.backFoldBw))); fK = fK * fK * (3 - 2 * fK);
         var yF = Math.min(exitY, yBody - G.backFoldDropCm / cmU), rF = Math.max(1e-6, G.backFoldRampCm / cmU), movedF = 0, iF, pF, wF;
-        for (iF = exitI + 1; iF < pts.length; iF++) {
-          pF = pts[iF]; if (!(pF.y < yF) || !(pF.z > exitZ)) continue;
+        var dzF = -1;                                                     // (2026-10-12q) 눌러 펴지 않고 통째로 뒤로 옮김 — 사용자: "어깨가 비고 · 뒷모습 아래쪽이 퍼지질 않고 일자"
+        for (iF = exitI + 1; iF < pts.length; iF++) {                    //   예전: 어깨 아래 점마다 앞으로 나온 만큼을 지워(z → 두피 벗어난 깊이) 모든 가닥이 한 판으로 눌림 → 출렁임·퍼짐이 사라짐(이 손님 21,629가닥)
+          pF = pts[iF]; if (!(pF.y < yF)) continue;                      //   지금: 어깨 높이에서 앞으로 나와 있던 만큼(dzF)만 아래 전체를 뒤로 평행 이동 → 가닥 모양·가닥끼리의 벌어짐은 그대로 · 예전 = REGROW.backFoldFlat=true
+          if (dzF < 0) dzF = Math.max(0, pF.z - exitZ);
           wF = Math.min(1, (yF - pF.y) / rF); wF = fK * wF * wF * (3 - 2 * wF); if (!(wF > 1e-4)) continue;
-          pts[iF] = { x: pF.x, y: pF.y, z: pF.z - wF * (pF.z - exitZ) }; movedF++;
+          var zN = G.backFoldFlat ? (pF.z > exitZ ? pF.z - wF * (pF.z - exitZ) : pF.z) : pF.z - wF * dzF;
+          if (zN === pF.z) continue;
+          pts[iF] = { x: pF.x, y: pF.y, z: zN }; movedF++;
         }
         if (movedF) { st.foldN = (st.foldN || 0) + 1; st.foldPts = (st.foldPts || 0) + movedF; }
       }

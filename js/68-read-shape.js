@@ -56,7 +56,8 @@
     rootNbr: 0.06,       // C: 뿌리 이웃 칸(≈ 1.2cm · 둘레 27칸 ≈ 3.5cm 안의 뿌리들이 기준)
     rootCell: 0.04,      // B: 뿌리 찾기 칸(≈ 0.8cm)
     reach: 4,            // B
-    maxPts: 48,          // (2026-10-12o) 옮겨심은 길의 점 수 상한(웨이브 한 번에 8점쯤) · 0 = 그대로
+    maxPts: 48,
+    lockPull: 0.85, lockRootCm: 1.5,   // (2026-10-12s) 사진 타래 조각의 대표 길로 당기는 정도(0 = 당기지 않고 위상·크기만 같게) · (2026-10-12q) 컬 타래로 당기는 정도 · 뿌리에서 이 길이에 걸쳐 서서히 — 0 = 안 모음          // (2026-10-12o) 옮겨심은 길의 점 수 상한(웨이브 한 번에 8점쯤) · 0 = 그대로
     shape: true          // (2026-10-12j) 옮겨심은 축에 61번 굴곡(방향 필터 선 그대로)을 얹음 · false = 축만: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
   }, W.READ_SHAPE || {});
   var ST = RS.stats = { built: null, used: 0, fell: 0, curlAdd: 0, wave: null, roots: null, err: null };
@@ -165,6 +166,41 @@
     var out = new Array(M); for (i = 0; i < M; i++) { var s = L * i / (M - 1); while (j < n - 2 && S[j + 1] < s) j++; var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]); out[i] = { x: p[j].x + (p[j + 1].x - p[j].x) * u, y: p[j].y + (p[j + 1].y - p[j].y) * u, z: p[j].z + (p[j + 1].z - p[j].z) * u }; }
     return out;
   }
+  /* (2026-10-12s) 컬 타래 — 사진에서 읽은 타래 조각 기준(61번 clumpOfPath). 본보기 가닥마다 지나간 조각을 붙여 두고(buildIndex 뒤 한 번),
+   *  옮겨심을 때 그 조각의 대표 길(조각에 걸린 기른 가닥 중 가장 긴 것)로 뿌리에서 lockRootCm 지나며 lockPull만큼 당김. 조각에 안 걸린 가닥은 그대로. */
+  function clumpTable(ix) {
+    if (ix.clT !== undefined) return ix.clT;
+    var PC = W.PHOTO_CURL; ix.clT = null;
+    if (!PC || typeof PC.clumpOfPath !== 'function' || typeof PC.lockOn !== 'function' || !PC.lockOn()) return null;
+    var t0 = Date.now(), of = new Map(), ex = new Map(), lenOf = new Map(), n = 0;
+    ix.cells.forEach(function (L) { L.forEach(function (i) {
+      var p = ix.arr[i].pts, c = PC.clumpOfPath(p); if (!c) return; of.set(i, c); n++;
+      var L0 = 0, k; for (k = 1; k < p.length; k++) L0 += Math.hypot(p[k].x - p[k - 1].x, p[k].y - p[k - 1].y, p[k].z - p[k - 1].z);
+      if (!(lenOf.get(c.key) >= L0)) { lenOf.set(c.key, L0); ex.set(c.key, i); }
+    }); });
+    ix.clT = { of: of, ex: ex };
+    ST.clumps = { strands: n, clumps: ex.size, ms: Date.now() - t0 };
+    try { console.log(TAG + ' 사진 타래 조각 — 본보기 ' + n + '가닥이 조각 ' + ex.size + '개에 걸림 · ' + ST.clumps.ms + 'ms'); } catch (e) {}
+    return ix.clT;
+  }
+  function pullToClump(ix, bi, root, pts) {
+    var T = clumpTable(ix); if (!T) return null;
+    var c = T.of.get(bi); if (!c) return null;
+    var ei = T.ex.get(c.key); if (!(ei >= 0)) return null;
+    var out = { lk: c, pts: pts };
+    if (ei === bi || !(RS.lockPull > 0)) return out;
+    var src = ix.arr[ei].pts, q0 = src[0], M = pts.length, lp = new Array(src.length), k;
+    for (k = 0; k < src.length; k++) lp[k] = { x: src[k].x - q0.x + root.x, y: src[k].y - q0.y + root.y, z: src[k].z - q0.z + root.z };
+    lp = resample(lp, M);
+    var S = 0, o = [pts[0]], rU = RS.lockRootCm / cpu();
+    for (k = 1; k < M; k++) {
+      S += Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y, pts[k].z - pts[k - 1].z);
+      var w = Math.min(1, S / Math.max(1e-6, rU)); w = RS.lockPull * w * w * (3 - 2 * w);
+      o.push({ x: pts[k].x + (lp[k].x - pts[k].x) * w, y: pts[k].y + (lp[k].y - pts[k].y) * w, z: pts[k].z + (lp[k].z - pts[k].z) * w });
+    }
+    ST.locked = (ST.locked || 0) + 1; out.pts = o;
+    return out;
+  }
   function nearest(ix, p) {
     var RC = RS.rootCell, cx = Math.floor(p.x / RC), cy = Math.floor(p.y / RC), cz = Math.floor(p.z / RC), best = -1, bd = Infinity, r, a, b, c;
     for (r = 0; r <= RS.reach; r++) {
@@ -179,13 +215,13 @@
   }
 
   /* ── B. 슬라이더 — 59번 adjustFlow와 같은 "기준에서 움직인 만큼만" · 컬은 올린 만큼만 ── */
-  function adjustRead(s, g, base, lenOverride, styOverride) {
+  function adjustRead(s, g, base, lenOverride, styOverride, lk) {
     var cur = (state.sections && state.sections[s.sec]) || {};
     var sty = (styOverride !== undefined ? styOverride : uniformStyling()) || stylingForRoot(s.pts[0]) || {};
     var dlen = 50; try { dlen = SECTIONS[s.sec].defaults.length; } catch (e) {}
     var r = sectionLengthRatio(s.sec, typeof lenOverride === 'number' ? lenOverride : cur.length) / (sectionLengthRatio(s.sec, dlen) || 1);
     if (isFinite(r) && Math.abs(r - 1) > 1e-6) g = lengthStrand3D(g, r);
-    if (RS.shape) { try { var PCx = W.PHOTO_CURL; if (PCx && typeof PCx.applyShape === 'function') { var g2 = PCx.applyShape(g); if (g2 && g2 !== g) { g = g2; ST.shaped = (ST.shaped || 0) + 1; } } } catch (e) {} }   // (2026-10-12j) 옮겨심은 축 위에 사진 선 굴곡
+    if (RS.shape) { try { var PCx = W.PHOTO_CURL; if (PCx && typeof PCx.applyShape === 'function') { var g2 = PCx.applyShape(g, lk); if (g2 && g2 !== g) { g = g2; ST.shaped = (ST.shaped || 0) + 1; } } } catch (e) {} }   // (2026-10-12j) 옮겨심은 축 위에 사진 선 굴곡
     var curl = Math.max(0, cur.curl || 0), C0 = base.curl || 0, dC = curl - C0;
     var sweep = Math.max(-100, Math.min(100, (sty.sweep || 0) - (base.sweep || 0)));
     var vol = Math.max(0, Math.min(100, 50 + ((typeof sty.volume === 'number' ? sty.volume : 50) - (typeof base.volume === 'number' ? base.volume : 50))));
@@ -213,15 +249,16 @@
               var src = ix.arr[bi].pts, q0 = src[0], dx = root.x - q0.x, dy = root.y - q0.y, dz = root.z - q0.z, k;
               pts = new Array(src.length);
               for (k = 0; k < src.length; k++) pts[k] = { x: src[k].x + dx, y: src[k].y + dy, z: src[k].z + dz };
-              if (RS.maxPts > 2 && pts.length > RS.maxPts) pts = resample(pts, RS.maxPts);   // (2026-10-12o) 점 수를 마네킹 수준으로 — 기른 길은 0.4cm 걸음이라 긴 머리는 100점 넘음 → 그 뒤 모든 계산·그리기가 몇 배
+              if (RS.maxPts > 2 && pts.length > RS.maxPts) pts = resample(pts, RS.maxPts);
+              var lk = null; if (RS.lockPull >= 0) { try { var pc2 = pullToClump(ix, bi, root, pts); if (pc2) { pts = pc2.pts; lk = pc2.lk; } } catch (e2) {} }   // (2026-10-12s) 사진 타래 조각
             }
-            mem = s._rsh = { ix: ix, pts: pts };
+            mem = s._rsh = { ix: ix, pts: pts, lk: (typeof lk !== 'undefined') ? lk : null };
             if (pts) ST.used++; else ST.fell++;
           }
           if (mem.pts) {
             // 기준 = 잰 값 그대로(옮겨심은 길에 이미 들어 있는 넘김·볼륨·컬) — 컬은 스펙이 섹션에 넣은 값(= 사진에서 잰 컬)
             var base = {}; try { var sp = W.ORIG_MQ.spec; base = Object.assign({}, (sp && sp.flowBase) || {}); if (sp && sp.perm && typeof sp.perm.curl === 'number') base.curl = sp.perm.curl; } catch (e) {}
-            return adjustRead(s, mem.pts, base, lenOverride, styOverride);
+            return adjustRead(s, mem.pts, base, lenOverride, styOverride, mem.lk);
           }
         }
       } catch (e) { if (!ST.err) console.warn(TAG + ' 옮겨심기 실패 — 예전 경로', e); ST.err = String(e && e.message || e); }
@@ -233,7 +270,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : '') + RS.maxPts; } } catch (e) {}
+    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : '') + RS.maxPts + 'L' + RS.lockPull; } } catch (e) {}
     return s;
   };
 
