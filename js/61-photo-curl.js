@@ -463,6 +463,7 @@
    *    → 파장·진폭이 가닥마다·높이마다 사진대로 다름(곧은 선을 뽑은 칸은 굴곡 0 · 뿌리 쪽이 곧고 끝으로 갈수록 크게 출렁이는 모양이 사진에서 그대로)
    *  물결 면을 가닥(뿌리 자리)마다 돌림: 옆으로만 흔들리던 것(밧줄) → 옆·바깥 사이 어느 면 → 머리가 바깥으로 퍼짐
    *  끄기 PHOTO_CURL.gaborAll=false 후 PHOTO_CURL.refresh() */
+  PC.ptsPerWave = 12; PC.maxPts = 96;   // (2026-10-12n) 한 번 굽는 길이에 찍는 점 수(24 → 12) · 가닥당 점 상한 — 긴 웨이브 3만 가닥에서 점이 150개씩이라 3D 완성본 만드는 데 10초
   PC.lockDiaAsIs = 1.0; PC.lockMinCmAsIs = 0.8;   // (2026-10-12m) 사진: 덜 뭉친 타래로 고리 — 같은 위상으로 도는 자리 크기 = 컬 지름 × 이 값(작을수록 타래가 가늘고 많아짐)
   PC.gaborAll = true; PC.gaborBins = 5; PC.gaborBinTol = [0.12, 0.25];
   function viewForRoot(r) {
@@ -525,7 +526,7 @@
     var r0 = g[0], phi = 2 * Math.PI * hash3(r0.x * 13.7, r0.y * 71.3, r0.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
     var Am = 0, An = 0; for (b = 0; b < nb; b++) if (PF.A[b] > 0) { Am += PF.A[b]; An++; } Am = An ? Am / An : SH.A;
     var lockCm = Math.max(PC.lockMinCmAsIs, PC.lockDiaAsIs * 2 * Am);   // (2026-10-12m) 한 타래 크기 = 컬 지름 × lockDiaAsIs — 예전 7cm 칸이 통째로 같은 위상이라 한 고리에 가닥이 너무 많았음
-    var t = smoothPhase(r0, lockCm), ds = Math.min(Lmin / cpu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    var t = smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
       var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], bb = g[j + 1];
