@@ -381,7 +381,7 @@
       var ox = px, oy = py - CY0, oz = pz, ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
       var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz);
       if (!(bl > 1e-6)) { bx = 1; by = 0; bz = 0; bl = 1; } bx /= bl; by /= bl; bz /= bl;
-      var w = Math.min(1, s / Math.max(1e-6, ru)); w = w * w * (3 - 2 * w);
+      var w = rootW(s, cpu);
       var off = Au * w * Math.sin(2 * Math.PI * s / Lu + ph);
       out.push({ x: px + bx * off, y: py + by * off, z: pz + bz * off });
     }
@@ -399,6 +399,19 @@
        장이 모르는 자리(가닥이 안 지나간 곳)·못 읽은 자리(가닥마다 제각각 = 잔 컬)는 D ≈ 0 · aC ≈ 0 → 지금처럼 잰 값으로 지어낸 굴곡.
        기본은 꺼짐 — 주소 끝에 ?rw=1 을 붙이거나 콘솔에서 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh() (같은 올림으로 켠 것·끈 것을 바로 비교) */
   PC.readWave = false; PC.readGainMax = 2.5; PC.readFill = true;
+  /* (2026-10-12f) 방향 필터에서 읽은 첫 값 그대로 — 사용자: "웨이브와 컬이 방향필터에서 읽어낸 초기 정보 그대로 그려지도록 해줘. roots 고르게 펴주고"
+   *  예전(11d): 크기·간격을 사진 선(66번)과 42번 나선 측정 사이에서 섞음(w) → 사진에서 읽은 웨이브가 나선 값에 끌려 굵거나 가늘게 나옴.
+   *  지금: 사진 선이 있으면 크기 = 66번 진폭 · 한 번 = 66번 파장 · 앞뒤 굴곡(S자 ↔ 고리) = 66번 고리 정도만으로. 나선 측정·표(table)는 안 섞음.
+   *        다시 기른 머리 화면(뭉침 모양이 걸리는 쪽)에서도 같은 식으로 그림(사진 선이 있을 때). 사진 선이 없으면 예전 그대로.
+   *  뿌리: 모든 가닥이 뿌리에서 rootStraightCm 만큼은 곧게(굴곡 0) · 그 뒤 shapeRootCm에 걸쳐 같은 곡선으로 서서히 — 읽은 굴곡 장(⑤)도 같은 비율로.
+   *  예전 = PHOTO_CURL.gaborAsIs=false; PHOTO_CURL.rootStraightCm=0 후 PHOTO_CURL.refresh() */
+  PC.gaborAsIs = true; PC.rootStraightCm = 1.0;
+  function rootW(s, cpu) {                                                // 뿌리 펴기 — 모든 가닥 같은 곡선(곧게 rootStraightCm → shapeRootCm에 걸쳐 0→1)
+    var s0 = (PC.rootStraightCm || 0) / cpu, rr = Math.max(1e-6, (PC.shapeRootCm || 0) / cpu), w = (s - s0) / rr;
+    if (w <= 0) return 0; if (w >= 1) return 1; return w * w * (3 - 2 * w);
+  }
+  function gaborOK() { if (!PC.gaborAsIs) return false; var ws = waveShape(); return !!(ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0); }
+  PC.gaborOK = gaborOK;
   try { var rwQ = /[?&]rw=([0-9.]+)/.exec(String(location.search || '')); if (rwQ) PC.readWave = +rwQ[1] > 0; } catch (e) {}
   var rwMemo = { wf: null, gain: 1, lineU: 0 };
   function readField(SH, cpu) {
@@ -415,12 +428,15 @@
   }
   var bsMemo = { key: '', v: null };
   function blendShape(pm) {
-    var key = ''; try { key = [pm.rCm, pm.pitchCm, wsMemo.key].join('|'); } catch (e) {}
+    pm = pm || {}; var key = ''; try { key = [pm.rCm, pm.pitchCm, wsMemo.key, PC.gaborAsIs ? 'g' : ''].join('|'); } catch (e) {}
     var ws = waveShape();
     if (bsMemo.key === key + '|' + (ws ? ws.loop : '') && bsMemo.v) return bsMemo.v;
     var rH = pm.rCm > 0 ? pm.rCm * PC.radiusK : null, pH = pm.pitchCm > 0 ? pm.pitchCm : (rH ? rH * 2 : null), w = 1, A, L, src;
     function cl(x) { return Math.max(0, Math.min(1, x)); }
-    if (ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
+    if (PC.gaborAsIs && ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
+      w = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0]));   // 고리 정도만으로 S자 ↔ 고리
+      A = ws.ampCm; L = ws.lamCm; src = '방향 필터 그대로';
+    } else if (ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
       var wl = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), stp = ws.ampCm / ws.lamCm, wsx = cl((stp - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
       w = (wl + wsx) / 2;
       A = rH ? (1 - w) * ws.ampCm + w * rH : ws.ampCm; L = pH ? (1 - w) * ws.lamCm + w * pH : ws.lamCm; src = '사진 선 + 나선 측정';
@@ -451,11 +467,11 @@
       var ox = px, oy = py - CY0, oz = pz, od = ox * tx + oy * ty + oz * tz; ox -= od * tx; oy -= od * ty; oz -= od * tz;   // 바깥 방향(축에 수직으로)
       var ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
       var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
-      var wr = Math.min(1, s / Math.max(1e-6, ru)); wr = wr * wr * (3 - 2 * wr);
+      var wr = rootW(s, cpu);
       var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * SH.depth * Math.sin(t);
       fill = 1; rx = ry = rz = 0;
       if (RW) {
-        RW.wf.at(px, py, pz, fo); rx = RW.gain * fo.x; ry = RW.gain * fo.y; rz = RW.gain * fo.z;
+        RW.wf.at(px, py, pz, fo); rx = RW.gain * wr * fo.x; ry = RW.gain * wr * fo.y; rz = RW.gain * wr * fo.z;
         if (PC.readFill) fill = Math.max(0, Math.min(1, 1 - RW.gain * fo.a / Math.max(1e-9, RW.lineU)));
         mqS.readPts++; mqS.readFillSum += fill; if (fo.k > 0.5) mqS.readKnown++;
       }
@@ -478,8 +494,7 @@
     return res;
   }
   function mqCurl(g, C) {
-    var pm = origSpec(); if (!pm || !(C > 0) || typeof CURL_BUNDLE === 'undefined') return null;
-    var M = mqSolve(C, pm.rCm * PC.radiusK, pm.pitchCm > 0 ? pm.pitchCm : null);
+    var pm = origSpec(); if (!pm || !(C > 0) || typeof CURL_BUNDLE === 'undefined') return null;   // 원본 머리(마네킹)일 때만 — 마네킹 스타일에는 사진 결을 안 얹음
     var CB = CURL_BUNDLE, o = {}, sv = {}, k, args = Array.prototype.slice.call(arguments);
     // (2026-10-11d) 컬의 축은 3D 머리 덩어리(42번) 안에서 끝 — 축이 덩어리를 빠져나가면(두 점 연속) 거기까지(사진에서 잰 길이 · 얼굴 앞으로 내려오던 앞머리 축)
     var VC = (G && (G.volT || G.vol)) || null;   // (2026-10-11d) 축은 좁은 덩어리(여유 둔 교집합)에서 끊음 — 넓은 덩어리(다수결)로는 이마 앞 공중·옆머리 틈으로 나간 축(더듬이)이 안 끊겼음
@@ -498,6 +513,7 @@
       if (SH) { mqS.shaped = (mqS.shaped || 0) + 1; return pushIn(shapeStrand(axis0, SH), axis0); }
     }
     if (PC.waveMode) { var WS = waveShape(); if (WS && WS.isWave) { mqS.wave = (mqS.wave || 0) + 1; return pushIn(waveStrand(axis0, WS.ampCm, WS.lamCm), axis0); } }
+    var M = mqSolve(C, pm.rCm * PC.radiusK, pm.pitchCm > 0 ? pm.pitchCm : null);
     for (k in PC.look) o[k] = PC.look[k]; o.windCm = PC.mqWind; o.rootLeaveCm = PC.mqRootLeave; o.pitchThick = M.pt;
     args[2] = M.wave / 100;
     if (PC.mqStretch && M.remain < 0.999 && typeof lengthStrand3D === 'function') { try { args[0] = lengthStrand3D(args[0], 1 / M.remain); } catch (e) {} }
@@ -512,6 +528,9 @@
     W.curlStrand3D = function () {
       if (PC.mq && !lookActive()) { var mr = mqCurl.apply(this, arguments); if (mr) return mr; }
       if (!lookActive()) return innerCurl.apply(this, arguments);
+      if (PC.shapeMode && gaborOK() && arguments[0] && arguments[0].length > 1) {   // (2026-10-12f) 다시 기른 머리도 방향 필터 값 그대로
+        var SHg = blendShape(origSpec()); if (SHg) { S.gabor = (S.gabor || 0) + 1; return pushIn(shapeStrand(arguments[0], SHg), arguments[0]); }
+      }
       var CB = CURL_BUNDLE, L = PC.look, sv = {}, k;
       if (PC.clumpSize && curS && lockMemo.rOf && lockMemo.rOf.has(curS) && arguments.length >= 3 && S.rCm > 0) {   // 조각마다 잰 크기로 웨이브(컬 굵기)
         var rg0 = S.rCm * PC.radiusK, rc0 = Math.max(rg0 * PC.clumpRMin, Math.min(rg0 * PC.clumpRMax, lockMemo.rOf.get(curS)));
@@ -528,7 +547,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
