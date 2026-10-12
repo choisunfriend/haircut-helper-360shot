@@ -209,10 +209,11 @@
     tri3D: false, /* (2026-10-11r) 원인 찾기 결과 — 끔. 다시 켜기 REGROW.tri3D=true */ tri3DMinDeg: 35, tri3DPrior: 0.15,   // (2026-10-11a) 두피 밖 결의 3D 방향 = 두 장 이상의 사진 결이 만드는 평면들의 교선(깊이를 직전 걸음에서 물려받지 않음) · 시선축이 이 각 이상 벌어진 사진들일 때만
     volume: true, volCellCm: 0.6, volTight: true, volTightMinCurl: 30,   // (2026-10-11d) 3D 머리 덩어리 — 사진 네 장(마주 보는 사진 규칙)으로 칸마다 머리/아님을 한 번 정해 두고, 걷기·61번(마네킹 위 컬의 축 길이)이 같은 덩어리를 씀
     polNbr: true,       // (2026-10-11d) 뿌리 결이 옆으로 흐릴 때 앞뒤 방향을 "가운데 선 바깥"이 아니라 이웃 뿌리들의 방향으로(남자분 가운데 가르마의 원인)
-    straightCurly: true, straightMode: 'path', straightWinK: 1.0, straightCurlMin: 40, straightPitchK: 0.5, straightDHalfK: 4, straightRMinPx: 5, straightRMaxPx: 40,   // (2026-10-10s) 곱슬 사진은 큰 흐름만 따라 직모 뼈대로 기름(컬은 61·14c가 그 위에 얹음) — 반경 = 한 바퀴 간격 × K (못 쟀으면 dHalf × K) · 사진 px
+    straightCurly: false, straightMode: 'path', straightWinK: 1.0, straightCurlMin: 40, straightPitchK: 0.5, straightDHalfK: 4, straightRMinPx: 5, straightRMaxPx: 40,   // (2026-10-10s) 곱슬 사진은 큰 흐름만 따라 직모 뼈대로 기름(컬은 61·14c가 그 위에 얹음) — 반경 = 한 바퀴 간격 × K (못 쟀으면 dHalf × K) · 사진 px
     sliceMs: 60,        // (2026-10-12e) 30 → 60: 화면에 양보하는 횟수를 반으로(폰에서 쉬는 시간이 얼마인지는 아래 진단 줄 '일한 시간/쉰 시간'으로 확인)
     waveField: true, waveCellCm: 0.8, waveMinN: 3,   // (2026-10-12e) 읽은 굴곡 장 — 곱슬·웨이브 사진에서 '읽은 길 − 편 길'을 자리(칸)마다 모아 둠. 61번이 PHOTO_CURL.readWave일 때 마네킹 가닥에 그대로 얹음 · 안 만들기 waveField=false
-    axisGabor: true, axisK: 0.5, axisRMinPx: 4, axisRMaxPx: 60, axisWinK: 1.0,   // (2026-10-12j) 축 = 방향 필터 파장으로 고른 결을 따라 걸음(아래 설명) · 끄기 axisGabor=false
+    sGrid: true, sGridK: 4,   // (2026-10-12l) 고른 결 미리 계산(속도) · 끄기 sGrid=false
+    axisGabor: false, axisK: 0.5, axisRMinPx: 4, axisRMaxPx: 60, axisWinK: 1.0,   // (2026-10-12j) 축 = 방향 필터 파장으로 고른 결을 따라 걸음(아래 설명) · 끄기 axisGabor=false
     measureShare: 1, measureFull: ['front', 'temple'],   // (2026-10-12e) 기른 가닥은 재는 용도뿐(원본 = 마네킹 + 스펙)이라 measureFull 밖의 섹션은 이 비율만 기름 · 전부 기르기 measureShare=1
     seed: 20261003
   }, W.REGROW || {});
@@ -442,8 +443,7 @@
       return o2.length >= 3 ? o2 : pts;
     }
     var SOFF = []; (function () { var k; SOFF.push([0, 0, 1]); for (k = 0; k < 8; k++) { var a = k * Math.PI / 4; SOFF.push([Math.cos(a), Math.sin(a), 0.8]); SOFF.push([0.5 * Math.cos(a + Math.PI / 8), 0.5 * Math.sin(a + Math.PI / 8), 0.9]); } })();
-    function sampleOri(cam, ix, iy) {
-      if (!cam.sR) return sampleOrientation(cam.ori, ix * cam.kx, cam.mw, iy * cam.ky);
+    function sampleOriRaw(cam, ix, iy) {
       var cx = 0, cy = 0, ws = 0, cs = 0, k, q, sm, w, x, y;
       for (k = 0; k < SOFF.length; k++) {
         q = SOFF[k]; x = ix + q[0] * cam.sR; y = iy + q[1] * cam.sR;
@@ -456,6 +456,27 @@
       if (!(ws > 0)) return null;
       var R2 = Math.hypot(cx, cy) / ws;                       // 둘레 결이 한쪽으로 모이는 정도(0~1)
       return { angle: 0.5 * Math.atan2(cy, cx), coherence: (ws / cs) * R2 };
+    }
+    /* (2026-10-12l) 고른 결을 미리 한 번 계산해 둠 — 걸음마다 17자리를 읽던 것(기르기 18~35초) → 칸(반경 ÷ sGridK)마다 한 번 읽어 두고 걸음은 둘레 4칸을 섞기만 */
+    function smoothGrid(cam) {
+      var g = Math.max(2, cam.sR / (G.sGridK || 4)), gw = Math.ceil(cam.iw / g) + 1, gh = Math.ceil(cam.ih / g) + 1, N = gw * gh;
+      var X = new Float32Array(N), Y = new Float32Array(N), C = new Float32Array(N), ok = new Uint8Array(N), i, j, k, r;
+      for (j = 0; j < gh; j++) for (i = 0; i < gw; i++) {
+        k = j * gw + i; if (!(cam.smp.at(i * g, j * g) > 0) && !(cam.smp.at(Math.min(cam.iw - 1, i * g + g / 2), Math.min(cam.ih - 1, j * g + g / 2)) > 0)) continue;
+        r = sampleOriRaw(cam, i * g, j * g); if (!r) continue;
+        ok[k] = 1; C[k] = r.coherence; X[k] = Math.cos(2 * r.angle) * r.coherence; Y[k] = Math.sin(2 * r.angle) * r.coherence;
+      }
+      return { g: g, gw: gw, gh: gh, X: X, Y: Y, C: C, ok: ok };
+    }
+    function sampleOri(cam, ix, iy) {
+      if (!cam.sR) return sampleOrientation(cam.ori, ix * cam.kx, cam.mw, iy * cam.ky);
+      if (G.sGrid === false) return sampleOriRaw(cam, ix, iy);
+      var SG = cam.sG || (cam.sG = smoothGrid(cam)), fx = ix / SG.g, fy = iy / SG.g, i0 = Math.floor(fx), j0 = Math.floor(fy), u = fx - i0, v = fy - j0;
+      if (i0 < 0 || j0 < 0 || i0 >= SG.gw - 1 || j0 >= SG.gh - 1) return null;
+      var k = j0 * SG.gw + i0, ks = [k, k + 1, k + SG.gw, k + SG.gw + 1], ws4 = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v], x = 0, y = 0, c = 0, w = 0, t;
+      for (t = 0; t < 4; t++) { var q = ks[t]; if (!SG.ok[q]) continue; x += ws4[t] * SG.X[q]; y += ws4[t] * SG.Y[q]; c += ws4[t] * SG.C[q]; w += ws4[t]; }
+      if (!(w > 0.25)) return null;
+      return { angle: 0.5 * Math.atan2(y, x), coherence: c / w };
     }
 
     // 난수(결정적)

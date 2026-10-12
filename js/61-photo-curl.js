@@ -454,8 +454,8 @@
     try { console.log(TAG + ' ③ 컬 모양(기준선 없음) — ' + mqS.shapeTxt); } catch (e) {}
     return v;
   }
-  function smoothPhase(r0) {                                              // 자리에 따라 부드럽게 바뀌는 위상(파장 phaseWaveCm)
-    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / (PC.phaseWaveCm / cpu);
+  function smoothPhase(r0, waveCm) {                                      // 자리에 따라 부드럽게 바뀌는 위상(파장 phaseWaveCm · 주면 그 값)
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / ((waveCm > 0 ? waveCm : PC.phaseWaveCm) / cpu);
     return Math.PI * (Math.sin(r0.x * k + 1.3) + Math.sin(r0.y * k * 0.83 + 2.1) + Math.sin(r0.z * k * 1.17 + 0.4)) + (PC.gaborAsIs ? PC.phaseJitAsIs : PC.phaseJit) * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5);
   }
   /* (2026-10-12i) 선 하나하나 그대로 — 사용자: "정보를 중앙값만 갖고 오지 말고 다 가져와 · 머리가 밧줄처럼 일자 · 굴곡지면서 퍼져야"
@@ -463,6 +463,7 @@
    *    → 파장·진폭이 가닥마다·높이마다 사진대로 다름(곧은 선을 뽑은 칸은 굴곡 0 · 뿌리 쪽이 곧고 끝으로 갈수록 크게 출렁이는 모양이 사진에서 그대로)
    *  물결 면을 가닥(뿌리 자리)마다 돌림: 옆으로만 흔들리던 것(밧줄) → 옆·바깥 사이 어느 면 → 머리가 바깥으로 퍼짐
    *  끄기 PHOTO_CURL.gaborAll=false 후 PHOTO_CURL.refresh() */
+  PC.lockDiaAsIs = 1.0; PC.lockMinCmAsIs = 0.8;   // (2026-10-12m) 사진: 덜 뭉친 타래로 고리 — 같은 위상으로 도는 자리 크기 = 컬 지름 × 이 값(작을수록 타래가 가늘고 많아짐)
   PC.gaborAll = true; PC.gaborBins = 5; PC.gaborBinTol = [0.12, 0.25];
   function viewForRoot(r) {
     var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
@@ -522,7 +523,9 @@
     var nb = PF.A.length, w = SH.w, useH = PC.gaborPitchFromHelix && SH.pH > 0, Lmin = 1e9, b;
     for (b = 0; b < nb; b++) { PF.L[b] = useH ? (1 - w) * PF.L[b] + w * SH.pH : PF.L[b]; if (PF.L[b] < Lmin) Lmin = PF.L[b]; }
     var r0 = g[0], phi = 2 * Math.PI * hash3(r0.x * 13.7, r0.y * 71.3, r0.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
-    var t = smoothPhase(r0), ds = Math.min(Lmin / cpu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    var Am = 0, An = 0; for (b = 0; b < nb; b++) if (PF.A[b] > 0) { Am += PF.A[b]; An++; } Am = An ? Am / An : SH.A;
+    var lockCm = Math.max(PC.lockMinCmAsIs, PC.lockDiaAsIs * 2 * Am);   // (2026-10-12m) 한 타래 크기 = 컬 지름 × lockDiaAsIs — 예전 7cm 칸이 통째로 같은 위상이라 한 고리에 가닥이 너무 많았음
+    var t = smoothPhase(r0, lockCm), ds = Math.min(Lmin / cpu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
       var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], bb = g[j + 1];
@@ -614,7 +617,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
