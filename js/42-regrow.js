@@ -211,7 +211,8 @@
     polNbr: true,       // (2026-10-11d) 뿌리 결이 옆으로 흐릴 때 앞뒤 방향을 "가운데 선 바깥"이 아니라 이웃 뿌리들의 방향으로(남자분 가운데 가르마의 원인)
     straightCurly: true, straightMode: 'path', straightWinK: 1.0, straightCurlMin: 40, straightPitchK: 0.5, straightDHalfK: 4, straightRMinPx: 5, straightRMaxPx: 40,   // (2026-10-10s) 곱슬 사진은 큰 흐름만 따라 직모 뼈대로 기름(컬은 61·14c가 그 위에 얹음) — 반경 = 한 바퀴 간격 × K (못 쟀으면 dHalf × K) · 사진 px
     sliceMs: 60,        // (2026-10-12e) 30 → 60: 화면에 양보하는 횟수를 반으로(폰에서 쉬는 시간이 얼마인지는 아래 진단 줄 '일한 시간/쉰 시간'으로 확인)
-    waveField: true, waveCellCm: 0.8, waveMinN: 3,   // (2026-10-12e) 읽은 굴곡 장 — 곱슬·웨이브 사진에서 '읽은 길 − 편 길'을 자리(칸)마다 모아 둠. 61번이 PHOTO_CURL.readWave일 때 마네킹 가닥에 그대로 얹음 · 안 만들기 waveField=false
+    waveField: true, waveCellCm: 0.8, waveMinN: 3, waveFieldMinCurl: 15,   // (2026-10-12f) 이 컬 값 이상이면(직모 뼈대 문턱 미만인 웨이브도) 읽은 굴곡 장을 만듦
+      // (2026-10-12e) 읽은 굴곡 장 — 곱슬·웨이브 사진에서 '읽은 길 − 편 길'을 자리(칸)마다 모아 둠. 61번이 PHOTO_CURL.readWave일 때 마네킹 가닥에 그대로 얹음 · 안 만들기 waveField=false
     measureShare: 0.5, measureFull: ['front', 'temple'],   // (2026-10-12e) 기른 가닥은 재는 용도뿐(원본 = 마네킹 + 스펙)이라 measureFull 밖의 섹션은 이 비율만 기름 · 전부 기르기 measureShare=1
     seed: 20261003
   }, W.REGROW || {});
@@ -368,11 +369,12 @@
     });
     if (!cams.length) return { err: '쓸 수 있는 사진 없음' };
     // (2026-10-10s) 직모 뼈대 — 곱슬 사진이면 결을 한 바퀴보다 넓게 평균 내어 읽음(사진의 컬을 뼈대에 복사하지 않음 · 컬은 나중에 잰 값으로 얹음)
-    var straightOn = false, straightNote = [], pitchCs = [], straightWinCm = 0;
+    var straightOn = false, wfOn = false, straightNote = [], pitchCs = [], straightWinCm = 0;
     try {
       var pcS = G.straightCurly ? G.photoCurl() : null;
-      if (pcS && pcS.raw >= G.straightCurlMin) {
-        straightOn = true;
+      // (2026-10-12f) 웨이브(직모 뼈대 문턱 미만)도 '읽은 굴곡 장'은 만듦 — 뼈대는 읽은 그대로 두고, 편 길은 장에 넣을 때만 씀
+      if (pcS && pcS.raw >= Math.min(G.straightCurlMin, G.waveFieldMinCurl > 0 ? G.waveFieldMinCurl : G.straightCurlMin)) {
+        straightOn = pcS.raw >= G.straightCurlMin; wfOn = true;
         cams.forEach(function (cam) {
           var mi = state.hairMasks && state.hairMasks[cam.angle], id = mi && mi.identity, r = 0, how = '';
           var hx = id && id.curlHelix;
@@ -380,10 +382,10 @@
           else if (id && id.curlDHalf > 0) { r = id.curlDHalf * G.straightDHalfK; how = 'd'; }
           r = clampN(r || G.straightRMinPx * 2, G.straightRMinPx, G.straightRMaxPx);
           if (hx && hx.P >= 6 && hx.peak >= G.helixPeak) { var cppS = 0; try { cppS = cmPerMaskPx(cam.angle); } catch (e2) {} if (cppS > 0) pitchCs.push(hx.P * cppS / Math.max(0.3, Math.cos((hx.beta || 0) * Math.PI / 180))); }
-          if (G.straightMode === 'field') cam.sR = r; straightNote.push(cam.angle + ' ' + r.toFixed(0) + 'px' + (how ? '(' + how + ')' : ''));
+          if (G.straightMode === 'field' && straightOn) cam.sR = r; straightNote.push(cam.angle + ' ' + r.toFixed(0) + 'px' + (how ? '(' + how + ')' : ''));
         });
       }
-        if (straightOn) {                                                  // 한 바퀴 간격(cm) — 사진마다 잰 값의 중앙값 · 못 쟀으면 반경 × 2π · 그것도 없으면 2.5cm
+        if (wfOn) {                                                        // 한 바퀴 간격(cm) — 사진마다 잰 값의 중앙값 · 못 쟀으면 반경 × 2π · 그것도 없으면 2.5cm
           pitchCs.sort(function (x, y) { return x - y; });
           var pc0 = pitchCs.length ? pitchCs[pitchCs.length >> 1] : (pcS.rCm > 0 ? 2 * Math.PI * pcS.rCm * 0.5 : 2.5);
           straightWinCm = clampN(pc0 * G.straightWinK, 1.5, 20);   // 가닥을 따라 잰 한 바퀴 길이(= 간격 ÷ cos 기울기)
@@ -392,7 +394,7 @@
     } catch (e) { straightOn = false; }
     var nStraight = 0, straightShrink = [];
     var WFb = null;                                                       // (2026-10-12e) 읽은 굴곡 장 — 편 가닥이 있을 때만
-    if (straightOn && straightWinCm > 0 && G.waveField !== false && G.waveCellCm > 0) {
+    if (straightWinCm > 0 && G.waveField !== false && G.waveCellCm > 0) {
       try { var cmW = 18.6; try { cmW = modelCmPerUnit() || cmW; } catch (e3) {} var hw = Math.max(Eh.a, Eh.c) * 2.3;
         WFb = makeWaveField(G.waveCellCm / cmW, { x0: -hw, x1: hw, z0: -hw, z1: hw, y0: yTop - 62 / cmW, y1: yTop + 3 / cmW }, straightWinCm / cmW); } catch (e) { WFb = null; }
     }
@@ -985,6 +987,9 @@
         if (movedF) { st.foldN = (st.foldN || 0) + 1; st.foldPts = (st.foldPts || 0) + movedF; }
       }
       pts = smoothPts(pts);
+      if (!straightOn && straightWinCm > 0 && WFb) {                     // (2026-10-12f) 웨이브 — 뼈대는 읽은 그대로, 굴곡만 장에 모음
+        try { var ptsW = straightenPath(straightenPath(pts, straightWinCm / cmU), straightWinCm / cmU); if (ptsW !== pts) WFb.add(pts, ptsW); } catch (e) {}
+      }
       if (straightOn && straightWinCm > 0) {                              // (2026-10-10s) 곱슬 — 사진 컬을 뼈대에서 빼고 축만 남김
         var L0s = 0, L1s = 0, iS; for (iS = 1; iS < pts.length; iS++) L0s += Math.hypot(pts[iS].x - pts[iS - 1].x, pts[iS].y - pts[iS - 1].y, pts[iS].z - pts[iS - 1].z);
         var ptsS = straightenPath(straightenPath(pts, straightWinCm / cmU), straightWinCm / cmU);

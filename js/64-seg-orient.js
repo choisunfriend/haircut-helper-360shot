@@ -200,7 +200,11 @@
    *   이어진 덩어리로 묶어, 덩어리 넓이(실제 두피 넓이 — 정수리 꼭대기 칸은 작음)가 머리 넓이의 rootBaldArea 미만이면 보통의 rootFill배로 채움.
    *   그보다 큰 덩어리이면서 거의 비어 있으면(평균 rootBaldDen 미만) 진짜 빈 자리(대머리·M자)로 보고 그대로 둠.
    */
-  Object.assign(SO, Object.assign({ rootFix: true, rootLow: 0.6, rootFill: 0.95, rootBaldArea: 0.04, rootBaldDen: 0.12 }, W.SEG_ORIENT_ROOT || {}));
+  /* (2026-10-12f) 뿌리 고르게 펴기(rootEven) — 사용자: "머리에 숱이 없거나 대머리로 판정된 경우가 아니면, roots가 골고루 분포되도록 해줘"
+   *   영상(긴 웨이브 여자분 · Roots): 노란 점이 정수리·앞쪽에 몰리고 옆·뒤는 성김. 낮은 칸만 채우던 위 규칙으로는 "보통보다 진한 칸"(앞 사진이 잘 보이는 자리)이 그대로 남음.
+   *   지금: 대머리·M자로 남긴 덩어리(위 규칙)를 뺀 머리 칸은 전부 보통 밀도(base)로 맞춤 → 가닥 수는 칸 넓이에만 비례(두피 위 고르게).
+   *   머리 전체가 성기면(보통 밀도 base < rootBaldDen — 숱이 없는 손님) 펴지 않고 잰 그대로 둠. 끄기 SEG_ORIENT.rootEven=false */
+  Object.assign(SO, Object.assign({ rootFix: true, rootLow: 0.6, rootFill: 0.95, rootBaldArea: 0.04, rootBaldDen: 0.12, rootEven: true }, W.SEG_ORIENT_ROOT || {}));
   S.roots = [];
   var origFill = W.fillUnseenRootCells;
   if (typeof origFill === 'function') W.fillUnseenRootCells = function (ro) {
@@ -223,12 +227,17 @@
           for (var j = 0; j < 4; j++) { var q = nb[j]; if (q < 0 || lab[q] || est[q] === OFFv || !(den[q] < low)) continue; lab[q] = nl; st.push(q); }
         }
         var A = 0, dsum = 0; comp.forEach(function (c2) { A += area[c2]; dsum += den[c2] * area[c2]; });
-        if (A >= SO.rootBaldArea * hairA && dsum / Math.max(1e-9, A) < SO.rootBaldDen) { kept++; keptCells += comp.length; continue; }
+        if (A >= SO.rootBaldArea * hairA && dsum / Math.max(1e-9, A) < SO.rootBaldDen) { kept++; keptCells += comp.length; comp.forEach(function (c2) { lab[c2] = -1; }); continue; }
         comp.forEach(function (c2) { den[c2] = Math.max(den[c2], base * SO.rootFill); filled++; });
       }
-      var info = { base: +base.toFixed(2), filled: filled, groups: nl, keptGroups: kept, keptCells: keptCells };
+      var evened = 0, thinAll = !(base >= SO.rootBaldDen);
+      if (SO.rootEven && !thinAll) for (i = 0; i < N; i++) {
+        if (est[i] === OFFv || lab[i] === -1 || !(den[i] >= 0)) continue;
+        if (den[i] !== base) { den[i] = base; evened++; }
+      }
+      var info = { base: +base.toFixed(2), filled: filled, groups: nl, keptGroups: kept, keptCells: keptCells, evened: evened, thinAll: thinAll };
       S.roots.push(info); if (S.roots.length > 4) S.roots.shift();
-      console.log(TAG + ' 뿌리 고르게 — 보통 밀도 ' + info.base + ' · 낮은 칸 덩어리 ' + nl + '개 중 채운 칸 ' + filled + ' · 넓고 비어 있어 그대로 둔 덩어리 ' + kept + '개(' + keptCells + '칸 — 대머리·M자로 봄) · 끄기 SEG_ORIENT.rootFix=false');
+      console.log(TAG + ' 뿌리 고르게 — 보통 밀도 ' + info.base + ' · 낮은 칸 덩어리 ' + nl + '개 중 채운 칸 ' + filled + ' · 넓고 비어 있어 그대로 둔 덩어리 ' + kept + '개(' + keptCells + '칸 — 대머리·M자로 봄) · ' + (SO.rootEven ? (thinAll ? '머리 전체가 성겨 고르게 펴기 안 함' : '고르게 편 칸 ' + evened) : '고르게 펴기 꺼짐') + ' · 끄기 SEG_ORIENT.rootFix=false / rootEven=false');
     } catch (e) { S.err = '뿌리: ' + (e && e.message || e); }
     return r;
   };
