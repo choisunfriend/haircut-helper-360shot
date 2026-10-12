@@ -619,6 +619,7 @@
   PC.rsApply = true; PC.rsMaxLines = 200;
   PC.exportShape = function () {
     try {
+      if (!shapeAllowed()) return null;   // (2026-10-13a) 직모 원본에서 등록한 스타일에는 굴곡을 안 실음
       var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab || !SH.gab.byView) return null;
       var bv = {}, k; for (k in SH.gab.byView) {
         var L = SH.gab.byView[k], st = Math.max(1, Math.ceil(L.length / PC.rsMaxLines)), o = [], i;
@@ -650,12 +651,22 @@
     }
     return shapeStrandAll(g, SH, null, OV) || g;
   };
+  /* (2026-10-13a) 직모에는 굴곡을 안 얹음 — 사용자: "폰에서 찍은 건 직모 여자인데, 컬이 얹힌 거야"
+   *  예전: applyShape가 잰 컬과 상관없이 사진 방향 필터 선(66번)의 진폭을 얹음 → 직모 사진도 선마다 잔 흔들림(빛·잔머리)이 있어 0.5~1cm 굴곡이 생김.
+   *  지금: 원본 스펙의 잰 컬(perm.curl)이 shapeMinCurl 미만이면 얹지 않고 스타일에도 안 실음. 끄기 PHOTO_CURL.shapeMinCurl=0 */
+  PC.shapeMinCurl = 10;
+  function measuredCurl() { try { var sp = W.ORIG_MQ && W.ORIG_MQ.spec, pm = sp && sp.perm; return (pm && typeof pm.curl === 'number') ? pm.curl : null; } catch (e) { return null; } }
+  function shapeAllowed() { var c = measuredCurl(); if (c == null || !(PC.shapeMinCurl > 0)) return true; if (c < PC.shapeMinCurl) { mqS.straightSkip = (mqS.straightSkip || 0) + 1; return false; } return true; }
+  PC.shapeAllowed = shapeAllowed;
   PC.applyShape = function (g, lk) {                                     // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음 · lk = 그 가닥의 사진 타래 조각
     if (!PC.on || !PC.gaborAll || !g || g.length < 2) return g;
+    if (!shapeAllowed()) return g;
     var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab) return g;
     if (PC.cellMode) SH = Object.assign({}, SH, { rec: true });
-    return shapeStrandAll(g, SH, lk) || g;
+    var res = shapeStrandAll(g, SH, lk) || g;
+    return (res !== g && PC.shapePushIn) ? pushIn(res, g) : res;   // (2026-10-13a) 굴곡이 3D 머리 덩어리 밖(목·옆 공중)으로 부푼 점은 축 쪽으로 당김
   };
+  PC.shapePushIn = true;
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
   PC.mqPushIn = true; mqS.pushed = 0;
   function pushIn(res, axis) {
@@ -724,7 +735,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs + (PC.lockMode ? 'L' + PC.lockW + ':' + PC.lockJit + (PC.readPhase !== false ? 'p' : '') : '') : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs + (PC.lockMode ? 'L' + PC.lockW + ':' + PC.lockJit + (PC.readPhase !== false ? 'p' : '') : '') : '') : 0, 'sm' + PC.shapeMinCurl + (PC.shapePushIn ? 'p' : '') + ':' + measuredCurl(), PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
@@ -737,6 +748,7 @@
       ' · 타래 뼈대: ' + (!PC.lock ? '꺼짐' : (a && lockMemo.map ? '타래 ' + lockMemo.locks + '개(뿌리 자리 ' + (+lockMemo.cm).toFixed(1) + (lockMemo.cmHi > lockMemo.cm + 0.05 ? '~' + (+lockMemo.cmHi).toFixed(1) : '') + 'cm = 컬 지름 ' + (S.rCm > 0 ? (2 * S.rCm * PC.radiusK).toFixed(1) + 'cm' : '못 잼') + ' × ' + PC.lockDia + '직경' + (PC.lockBase ? ' × 펌·베이스 폭' : '') + ' · 타래당 ' + Math.round(lockMemo.per || 0) + '가닥) · 사진 타래 조각으로 묶은 가닥 ' + (lockMemo.clumped || 0) + '(사진 ' + (lockMemo.clumpViews || 0) + '장 · 조각 크기 반경 ' + (lockMemo.rMed ? lockMemo.rP25.toFixed(1) + '/' + lockMemo.rMed.toFixed(1) + '/' + lockMemo.rP75.toFixed(1) + 'cm' : '-') + ' · 조각 크기로 감은 가닥 ' + (S.sized || 0) + ') · 길잡이로 모은 가닥 ' + lockMemo.moved + '/' + lockMemo.n + ' · ' + Math.round(lockMemo.ms) + 'ms' : (a ? '아직 안 만듦' : '안 걸림'))) +
       (S.err ? ' · ⚠ ' + S.err : ''));
     if (mqS.solved) L.push('   ④ 마네킹 위 잰 컬: ' + mqS.solved + ' · 감은 가닥 ' + mqS.calls + ' · 3D 머리 덩어리 밖에서 축을 끝낸 가닥 ' + (mqS.cut || 0) + ' · 좁은 덩어리 밖으로 부푼 점을 당겨 넣음 ' + (mqS.pushed || 0) + ' · 기준선 없이 감은 가닥 ' + (mqS.shaped || 0) + (mqS.shapeTxt ? '(' + mqS.shapeTxt + ')' : '') + ' (끄기 PHOTO_CURL.mqVolCut / mqPushIn / waveMode=false)');
+    if (mqS.straightSkip) L.push('   직모라 굴곡 안 얹음: 가닥 ' + mqS.straightSkip + '번(잰 컬 ' + measuredCurl() + ' < ' + PC.shapeMinCurl + ' · 끄기 PHOTO_CURL.shapeMinCurl=0)');
     L.push('   ⑤ 읽은 굴곡 그대로: ' + (!PC.readWave ? '꺼짐(켜기 = 주소 끝에 ?rw=1 · 콘솔 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh())' : (mqS.readPts > 0 ? '켜짐 — ' + mqS.readTxt + ' · 얹은 점 ' + mqS.readPts + '(굴곡 장이 아는 자리 ' + Math.round(mqS.readKnown / mqS.readPts * 100) + '%) · 지어낸 굴곡을 남긴 비율 평균 ' + Math.round(mqS.readFillSum / mqS.readPts * 100) + '% (끄기 ?rw=0)' : '켜짐 — 아직 안 걸림(곱슬·웨이브 원본 머리가 아니거나 굴곡 장이 없음)')));
     return L;
   };
