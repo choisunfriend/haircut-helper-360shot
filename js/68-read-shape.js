@@ -263,7 +263,9 @@
         }
       } catch (e) { if (!ST.err) console.warn(TAG + ' 옮겨심기 실패 — 예전 경로', e); ST.err = String(e && e.message || e); }
     }
-    return prevAdj.apply(this, arguments);
+    var outA = prevAdj.apply(this, arguments);
+    try { if (s && s.mannequin && W.PHOTO_CURL && typeof W.PHOTO_CURL.activeRS === 'function') { var rs = W.PHOTO_CURL.activeRS(); if (rs && outA && outA.length > 1) { var o2 = W.PHOTO_CURL.applyShapeRS(RS.maxPts > 2 && outA.length > RS.maxPts ? resample(outA, RS.maxPts) : outA, rs); if (o2) { ST.rsShaped = (ST.rsShaped || 0) + 1; return o2; } } } } catch (e) {}   // (2026-10-12v) 다른 손님에게 건 스타일 — 결 표로 만든 길 위에 스타일에 실린 굴곡
+    return outA;
   };
   else console.warn(TAG + ' adjustStrandGeom이 없어 모양 옮겨심기를 못 합니다');
 

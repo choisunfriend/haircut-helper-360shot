@@ -580,6 +580,33 @@
     return out;
   }
   PC.blendShape = blendShape; PC._shapeStrand = shapeStrand;
+  /* (2026-10-12v) 굴곡을 스타일에 싣기 — 사용자: "적용받는 곳도 (그 손님 머리를) 다시 기르기 한 다음에 얹는 게 아니고, 편 다음에 얹어야"
+   *  원본 머리(68번)를 보며 스타일을 등록하면 이 손님 사진에서 읽은 굴곡(방향 필터 선 · 나선 쪽 · 한 바퀴 · 크기)을 spec.readShape로 실음(59번).
+   *  다른 손님에게 걸면: 그 손님의 뿌리 자리 + 스타일 결 표로 만든 길(59번 · 굴곡 없는 흐름) 위에 이 값으로 굴곡을 얹고(68번이 부름), 컬 엔진은 안 돌림(겹치지 않게).
+   *  받는 손님 사진의 굴곡은 쓰지 않음 · 타래 위상은 사진이 없으니 자리에 따라 부드럽게(타래 크기 = 컬 지름) · 끄기 PHOTO_CURL.rsApply=false */
+  PC.rsApply = true; PC.rsMaxLines = 200;
+  PC.exportShape = function () {
+    try {
+      var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab || !SH.gab.byView) return null;
+      var bv = {}, k; for (k in SH.gab.byView) {
+        var L = SH.gab.byView[k], st = Math.max(1, Math.ceil(L.length / PC.rsMaxLines)), o = [], i;
+        for (i = 0; i < L.length; i += st) o.push(L[i].map(function (x) { return isFinite(x) ? Math.round(x * 1000) / 1000 : 0; }));
+        bv[k] = o;
+      }
+      return { v: 1, A: +SH.A.toFixed(3), L: +SH.L.toFixed(3), w: +SH.w.toFixed(3), pH: SH.pH > 0 ? +SH.pH.toFixed(3) : 0,
+        gab: { lamCm: +(+SH.gab.lamCm).toFixed(3), ampCm: +(+SH.gab.ampCm).toFixed(3), loop: +(+SH.gab.loop).toFixed(3), nAll: SH.gab.nAll, byView: bv } };
+    } catch (e) { return null; }
+  };
+  function rsSpec() {
+    try { if (!PC.rsApply || origSpec()) return null; var id = state.specAppliedId; if (!id || typeof getStyleSpec !== 'function') return null; var sp = getStyleSpec(id); return (sp && sp.readShape && sp.readShape.gab) ? sp.readShape : null; } catch (e) { return null; }
+  }
+  PC.activeRS = rsSpec;
+  PC.applyShapeRS = function (g, rs) {
+    if (!PC.on || !g || g.length < 2 || !rs) return g;
+    var SH = { A: rs.A, L: rs.L, w: rs.w, depth: rs.w, pH: rs.pH, gab: rs.gab };
+    mqS.rs = (mqS.rs || 0) + 1;
+    return shapeStrandAll(g, SH, null) || g;
+  };
   PC.applyShape = function (g, lk) {                                     // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음 · lk = 그 가닥의 사진 타래 조각
     if (!PC.on || !PC.gaborAll || !g || g.length < 2) return g;
     var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab) return g;
@@ -631,6 +658,7 @@
   }
   if (typeof innerCurl === 'function') {
     W.curlStrand3D = function () {
+      if (rsSpec()) { mqS.rsNoCurl = (mqS.rsNoCurl || 0) + 1; return arguments[0]; }   // (2026-10-12v) 스타일에 실린 굴곡을 얹을 것이라 컬 엔진은 안 돌림
       if (PC.mq && !lookActive()) { var mr = mqCurl.apply(this, arguments); if (mr) return mr; }
       if (!lookActive()) return innerCurl.apply(this, arguments);
       if (PC.shapeMode && gaborOK() && arguments[0] && arguments[0].length > 1) {   // (2026-10-12f) 다시 기른 머리도 방향 필터 값 그대로
