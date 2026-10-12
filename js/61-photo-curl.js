@@ -391,7 +391,7 @@
    *  얼마나 고리인가 w(0 = 납작한 S자 · 1 = 둥근 나선)를 사진 선의 두 값으로 정함: 고리 정도(0.15→0 · 0.5→1)와 가파름(진폭÷파장 0.06→0 · 0.15→1)의 평균.
    *  크기·간격은 w만큼 나선 측정(42번 반경·한 바퀴)에서, 1−w만큼 사진 선(진폭·파장)에서. 앞뒤(두상 바깥) 굴곡 = 크기 × w.
    *  사진 선이 없으면 나선 측정만(w=1). 위상은 뿌리 자리의 부드러운 함수(칸 경계 없음 — 두상 위 격자 줄 고침) + 가닥마다 조금. */
-  PC.shapeMode = true; PC.shapeLoop = [0.15, 0.5]; PC.shapeSteep = [0.06, 0.15]; PC.shapeRootCm = 1.5; PC.phaseWaveCm = 7; PC.phaseJit = 0.5;
+  PC.shapeMode = true; PC.shapeLoop = [0.15, 0.5]; PC.shapeSteep = [0.06, 0.15]; PC.shapeRootCm = 1.5; PC.phaseWaveCm = 7; PC.phaseJit = 0.5; PC.phaseJitAsIs = 2.0;   // (2026-10-12g) 방향 필터 그대로일 때 가닥마다 흩는 위상(라디안) — 0.5면 이웃 가닥이 같은 자리에서 같이 출렁여 겹쳐 보임(뭉침 · 가닥 수가 적어 보임)
   /* (2026-10-12e) 읽은 굴곡 그대로 — 42번이 모아 둔 '읽은 굴곡 장'을 원본 머리(마네킹 + 스펙) 가닥에 얹고, 지어낸 웨이브는 "못 읽은 만큼만" 채움
        자리 p에서:  가닥 = 뼈대 + gain × D(p) + (1 − gain × aC(p) ÷ 잰 굴곡 크기) × 지어낸 굴곡
          D = 그 자리에서 읽은 벗어남(이웃 가닥이 같이 굽은 것만 남음) · aC = 그 크기
@@ -434,7 +434,10 @@
     var rH = pm.rCm > 0 ? pm.rCm * PC.radiusK : null, pH = pm.pitchCm > 0 ? pm.pitchCm : (rH ? rH * 2 : null), w = 1, A, L, src;
     function cl(x) { return Math.max(0, Math.min(1, x)); }
     if (PC.gaborAsIs && ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
-      w = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0]));   // 고리 정도만으로 S자 ↔ 고리
+      // (2026-10-12g) 옆에서 찍은 사진에서 나선(컬)은 S자로 비칩니다 — 고리 정도만으로는 컬을 못 가림(짧은 곱슬 손님: 고리 0.29 → 웨이브로만 나옴).
+      //   같은 사진 선의 가파름(진폭 ÷ 파장)이 크면 나선 — 둘 중 큰 쪽. 1이면 둥근 나선(반경 = 진폭 · 한 바퀴 = 파장), 0이면 납작한 S자.
+      var wl0 = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), ws0 = cl((ws.ampCm / ws.lamCm - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
+      w = Math.max(wl0, ws0);
       A = ws.ampCm; L = ws.lamCm; src = '방향 필터 그대로';
     } else if (ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
       var wl = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), stp = ws.ampCm / ws.lamCm, wsx = cl((stp - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
@@ -450,7 +453,7 @@
   }
   function smoothPhase(r0) {                                              // 자리에 따라 부드럽게 바뀌는 위상(파장 phaseWaveCm)
     var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / (PC.phaseWaveCm / cpu);
-    return Math.PI * (Math.sin(r0.x * k + 1.3) + Math.sin(r0.y * k * 0.83 + 2.1) + Math.sin(r0.z * k * 1.17 + 0.4)) + PC.phaseJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5);
+    return Math.PI * (Math.sin(r0.x * k + 1.3) + Math.sin(r0.y * k * 0.83 + 2.1) + Math.sin(r0.z * k * 1.17 + 0.4)) + (PC.gaborAsIs ? PC.phaseJitAsIs : PC.phaseJit) * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5);
   }
   function shapeStrand(g, SH) {
     var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, Au = SH.A / cpu, Lu = SH.L / cpu, ru = PC.shapeRootCm / cpu;
@@ -547,7 +550,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
