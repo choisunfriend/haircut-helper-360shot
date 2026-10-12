@@ -350,3 +350,36 @@
   };
   console.log('[64] 페이드 높이 = 옆·뒤 클리퍼 구역 전체 기준(섹션마다 따로 재던 것 고침) · 끄기 FADE_ZONE.on=false');
 })();
+
+/* 2026-10-12h — 마네킹 뿌리를 칸 안에서 고르게(무작위 → 고르게 퍼지는 수열)
+ * 사용자: "roots도 완전히 고르진 않아." 로그(18:38): 밀도는 이미 고르게 펴짐(고르게 편 칸 405 · 대머리 덩어리 0).
+ * 원인: 17a growMannequinStrand가 칸(약 27가닥) 안의 자리를 가닥마다 따로 무작위로 뽑음 → 몇 개씩 몰리고 빈 틈이 생김(무작위 점의 자잘한 뭉침).
+ *   또 극각을 칸 안에서 고르게 뽑아 칸의 위쪽(좁은 쪽)에 조금 더 몰림.
+ * 지금: 같은 칸의 k번째 가닥은 R2 수열(황금비 2차원)로 칸 안에 고르게 · 극각은 넓이 기준(cos 고르게). 다 만든 가닥을 그만큼(칸 크기 이내) 통째로 옮김.
+ * 끄기 MQ_ROOT_EVEN.on=false */
+(function () {
+  var W = window, inner = W.growMannequinStrand;
+  var RE = W.MQ_ROOT_EVEN = Object.assign({ on: true, n: 0 }, W.MQ_ROOT_EVEN || {});
+  if (typeof inner !== 'function') { console.warn('[64] growMannequinStrand 없음 — 뿌리 고르게(칸 안) 안 걸림'); return; }
+  var cnt = new Map(), lastCell = -1;
+  function frac(v) { return v - Math.floor(v); }
+  W.growMannequinStrand = function (cell, NT, NP, E, X, CY) {
+    var s = inner.apply(this, arguments);
+    if (!RE.on || !s || !s.pts || !s.pts.length || !E || !(NT > 0) || !(NP > 0)) return s;
+    try {
+      if (cell < lastCell) cnt.clear(); lastCell = cell;                       // 새로 심기 시작
+      var k = cnt.get(cell) || 0; cnt.set(cell, k + 1);
+      var r = (cell / NT) | 0, c = cell % NT, o1 = frac(Math.sin(cell * 12.9898) * 43758.5453), o2 = frac(Math.sin(cell * 78.233) * 12345.6789);
+      var u = frac(o1 + k * 0.7548776662), v = frac(o2 + k * 0.5698402910);
+      var c0 = Math.cos(r / NP * Math.PI), c1 = Math.cos((r + 1) / NP * Math.PI), ph = Math.acos(Math.max(-1, Math.min(1, c0 - u * (c0 - c1)))), th = (c + v) / NT * 2 * Math.PI - Math.PI;
+      var p0 = s.pts[0], nx = p0.x / E.a, ny = (p0.y - CY) / E.b, nz = p0.z / E.c, rr = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!(rr > 1e-6)) return s;
+      var q = { x: E.a * rr * Math.sin(ph) * Math.sin(th), y: CY + E.b * rr * Math.cos(ph), z: E.c * rr * Math.sin(ph) * Math.cos(th) };
+      var dx = q.x - p0.x, dy = q.y - p0.y, dz = q.z - p0.z;
+      for (var i = 0; i < s.pts.length; i++) { var p = s.pts[i]; s.pts[i] = { x: p.x + dx, y: p.y + dy, z: p.z + dz }; }
+      RE.n++;
+    } catch (e) {}
+    return s;
+  };
+  console.log('[64] 마네킹 뿌리 칸 안에서 고르게(R2 수열 · 넓이 기준 극각) · 끄기 MQ_ROOT_EVEN.on=false');
+})();
