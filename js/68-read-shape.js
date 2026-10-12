@@ -44,7 +44,7 @@
   'use strict';
   var W = window, TAG = '[읽은 모양]';
   var RS = W.READ_SHAPE = Object.assign({
-    on: true,            // B·C
+    on: false,           // B·C — (2026-10-13c) 끔: 원본 머리 = 마네킹 가닥 + 잰 값(컬·웨이브는 61번이 마네킹 위에서 감음). 사용자: "가닥이랑 자꾸 문제돼서 마네킨 기반으로 비교" · 주소 끝 ?rs=1 이면 예전(옮겨심기)
     waveRaw: false,      // A — (2026-10-12j) 끔: 웨이브도 42번 축(방향 필터 파장으로 고른 결)으로 걷고 굴곡은 61번이 얹음. 켜면 예전(읽은 길 그대로)
     evenRoots: true,     // D
     rootLow: 0.6,        // D: 보통 밀도의 이 비율 미만 칸은 손대지 않음(대머리·숱 적은 곳 후보 — 64번이 덩어리 크기로 가름)
@@ -61,6 +61,7 @@
     lockPull: 0, lockRootCm: 1.5,   // (2026-10-12u) 0: 대표 길로 당기지 않음 — 한 조각의 가닥이 한 줄로 겹쳐 뭉치가 됐음. 타래는 같은 조각 = 같은 사진 선 + 가닥마다 읽은 위상(61번)으로 · 예전 0.85   // (2026-10-12s) 사진 타래 조각의 대표 길로 당기는 정도(0 = 당기지 않고 위상·크기만 같게) · (2026-10-12q) 컬 타래로 당기는 정도 · 뿌리에서 이 길이에 걸쳐 서서히 — 0 = 안 모음          // (2026-10-12o) 옮겨심은 길의 점 수 상한(웨이브 한 번에 8점쯤) · 0 = 그대로
     shape: true          // (2026-10-12j) 옮겨심은 축에 61번 굴곡(방향 필터 선 그대로)을 얹음 · false = 축만: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
   }, W.READ_SHAPE || {});
+  try { var rsQ = /[?&]rs=([0-9]+)/.exec(String(location.search || '')); if (rsQ) RS.on = +rsQ[1] > 0; } catch (e) {}
   var ST = RS.stats = { built: null, used: 0, fell: 0, curlAdd: 0, wave: null, roots: null, err: null };
   var G = W.REGROW;
 
