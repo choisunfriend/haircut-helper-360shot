@@ -398,8 +398,6 @@
          gain = 잰 굴곡 크기(③) ÷ 읽은 굴곡의 크기(걸음이 넓어 읽은 굴곡이 실제보다 작게 잡히는 것을 사진 값으로 맞춤 · 1~readGainMax)
        장이 모르는 자리(가닥이 안 지나간 곳)·못 읽은 자리(가닥마다 제각각 = 잔 컬)는 D ≈ 0 · aC ≈ 0 → 지금처럼 잰 값으로 지어낸 굴곡.
        기본은 꺼짐 — 주소 끝에 ?rw=1 을 붙이거나 콘솔에서 PHOTO_CURL.readWave=true 후 PHOTO_CURL.refresh() (같은 올림으로 켠 것·끈 것을 바로 비교) */
-  /* (2026-10-12g) 다시 기본 끔 — 켜니 뿌리가 밀려 정수리가 비고 끝이 밧줄처럼 뭉침(사용자 스크린샷). 원래 (2026-10-12f) 기본 켬 — 사용자: "웨이브와 컬이 덩어리져서 나오는데 방향필터에서 읽은 내용을 그대로 반영되도록 해줘. 처음 읽는 정보가 형태를 가장 잘 반영하고 있어."
-       지어낸 굴곡(smoothPhase — 7cm마다 같은 위상이라 덩어리로 출렁임)은 읽은 굴곡이 모자란 자리만 채움. 끄기 ?rw=0 또는 PHOTO_CURL.readWave=false 후 PHOTO_CURL.refresh() */
   PC.readWave = false; PC.readGainMax = 2.5; PC.readFill = true;
   try { var rwQ = /[?&]rw=([0-9.]+)/.exec(String(location.search || '')); if (rwQ) PC.readWave = +rwQ[1] > 0; } catch (e) {}
   var rwMemo = { wf: null, gain: 1, lineU: 0 };
@@ -457,7 +455,7 @@
       var t = 2 * Math.PI * s / Lu + ph, c1 = Au * wr * Math.cos(t), c2 = Au * wr * SH.depth * Math.sin(t);
       fill = 1; rx = ry = rz = 0;
       if (RW) {
-        RW.wf.at(px, py, pz, fo); rx = wr * RW.gain * fo.x; ry = wr * RW.gain * fo.y; rz = wr * RW.gain * fo.z;   // (2026-10-12g) 뿌리 근처는 안 밂(정수리가 비던 것)
+        RW.wf.at(px, py, pz, fo); rx = RW.gain * fo.x; ry = RW.gain * fo.y; rz = RW.gain * fo.z;
         if (PC.readFill) fill = Math.max(0, Math.min(1, 1 - RW.gain * fo.a / Math.max(1e-9, RW.lineU)));
         mqS.readPts++; mqS.readFillSum += fill; if (fo.k > 0.5) mqS.readKnown++;
       }

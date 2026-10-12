@@ -200,11 +200,7 @@
    *   이어진 덩어리로 묶어, 덩어리 넓이(실제 두피 넓이 — 정수리 꼭대기 칸은 작음)가 머리 넓이의 rootBaldArea 미만이면 보통의 rootFill배로 채움.
    *   그보다 큰 덩어리이면서 거의 비어 있으면(평균 rootBaldDen 미만) 진짜 빈 자리(대머리·M자)로 보고 그대로 둠.
    */
-  /* (2026-10-12f) 뿌리 고르게 펴기(rootEven) — 사용자: "머리에 숱이 없거나 대머리로 판정된 경우가 아니면, roots가 골고루 분포되도록 해줘"
-   *   영상(긴 웨이브 여자분 · Roots): 노란 점이 정수리·앞쪽에 몰리고 옆·뒤는 성김. 낮은 칸만 채우던 위 규칙으로는 "보통보다 진한 칸"(앞 사진이 잘 보이는 자리)이 그대로 남음.
-   *   지금: 대머리·M자로 남긴 덩어리(위 규칙)를 뺀 머리 칸은 전부 보통 밀도(base)로 맞춤 → 가닥 수는 칸 넓이에만 비례(두피 위 고르게).
-   *   머리 전체가 성기면(보통 밀도 base < rootBaldDen — 숱이 없는 손님) 펴지 않고 잰 그대로 둠. 끄기 SEG_ORIENT.rootEven=false */
-  Object.assign(SO, Object.assign({ rootFix: true, rootLow: 0.6, rootFill: 0.95, rootBaldArea: 0.04, rootBaldDen: 0.12, rootEven: true }, W.SEG_ORIENT_ROOT || {}));
+  Object.assign(SO, Object.assign({ rootFix: true, rootLow: 0.6, rootFill: 0.95, rootBaldArea: 0.04, rootBaldDen: 0.12 }, W.SEG_ORIENT_ROOT || {}));
   S.roots = [];
   var origFill = W.fillUnseenRootCells;
   if (typeof origFill === 'function') W.fillUnseenRootCells = function (ro) {
@@ -227,17 +223,12 @@
           for (var j = 0; j < 4; j++) { var q = nb[j]; if (q < 0 || lab[q] || est[q] === OFFv || !(den[q] < low)) continue; lab[q] = nl; st.push(q); }
         }
         var A = 0, dsum = 0; comp.forEach(function (c2) { A += area[c2]; dsum += den[c2] * area[c2]; });
-        if (A >= SO.rootBaldArea * hairA && dsum / Math.max(1e-9, A) < SO.rootBaldDen) { kept++; keptCells += comp.length; comp.forEach(function (c2) { lab[c2] = -1; }); continue; }
+        if (A >= SO.rootBaldArea * hairA && dsum / Math.max(1e-9, A) < SO.rootBaldDen) { kept++; keptCells += comp.length; continue; }
         comp.forEach(function (c2) { den[c2] = Math.max(den[c2], base * SO.rootFill); filled++; });
       }
-      var evened = 0, thinAll = !(base >= SO.rootBaldDen);
-      if (SO.rootEven && !thinAll) for (i = 0; i < N; i++) {
-        if (est[i] === OFFv || lab[i] === -1 || !(den[i] >= 0)) continue;
-        if (den[i] !== base) { den[i] = base; evened++; }
-      }
-      var info = { base: +base.toFixed(2), filled: filled, groups: nl, keptGroups: kept, keptCells: keptCells, evened: evened, thinAll: thinAll };
+      var info = { base: +base.toFixed(2), filled: filled, groups: nl, keptGroups: kept, keptCells: keptCells };
       S.roots.push(info); if (S.roots.length > 4) S.roots.shift();
-      console.log(TAG + ' 뿌리 고르게 — 보통 밀도 ' + info.base + ' · 낮은 칸 덩어리 ' + nl + '개 중 채운 칸 ' + filled + ' · 넓고 비어 있어 그대로 둔 덩어리 ' + kept + '개(' + keptCells + '칸 — 대머리·M자로 봄) · ' + (SO.rootEven ? (thinAll ? '머리 전체가 성겨 고르게 펴기 안 함' : '고르게 편 칸 ' + evened) : '고르게 펴기 꺼짐') + ' · 끄기 SEG_ORIENT.rootFix=false / rootEven=false');
+      console.log(TAG + ' 뿌리 고르게 — 보통 밀도 ' + info.base + ' · 낮은 칸 덩어리 ' + nl + '개 중 채운 칸 ' + filled + ' · 넓고 비어 있어 그대로 둔 덩어리 ' + kept + '개(' + keptCells + '칸 — 대머리·M자로 봄) · 끄기 SEG_ORIENT.rootFix=false');
     } catch (e) { S.err = '뿌리: ' + (e && e.message || e); }
     return r;
   };
@@ -349,37 +340,4 @@
     return inner.apply(this, arguments);
   };
   console.log('[64] 페이드 높이 = 옆·뒤 클리퍼 구역 전체 기준(섹션마다 따로 재던 것 고침) · 끄기 FADE_ZONE.on=false');
-})();
-
-/* 2026-10-12h — 마네킹 뿌리를 칸 안에서 고르게(무작위 → 고르게 퍼지는 수열)
- * 사용자: "roots도 완전히 고르진 않아." 로그(18:38): 밀도는 이미 고르게 펴짐(고르게 편 칸 405 · 대머리 덩어리 0).
- * 원인: 17a growMannequinStrand가 칸(약 27가닥) 안의 자리를 가닥마다 따로 무작위로 뽑음 → 몇 개씩 몰리고 빈 틈이 생김(무작위 점의 자잘한 뭉침).
- *   또 극각을 칸 안에서 고르게 뽑아 칸의 위쪽(좁은 쪽)에 조금 더 몰림.
- * 지금: 같은 칸의 k번째 가닥은 R2 수열(황금비 2차원)로 칸 안에 고르게 · 극각은 넓이 기준(cos 고르게). 다 만든 가닥을 그만큼(칸 크기 이내) 통째로 옮김.
- * 끄기 MQ_ROOT_EVEN.on=false */
-(function () {
-  var W = window, inner = W.growMannequinStrand;
-  var RE = W.MQ_ROOT_EVEN = Object.assign({ on: true, n: 0 }, W.MQ_ROOT_EVEN || {});
-  if (typeof inner !== 'function') { console.warn('[64] growMannequinStrand 없음 — 뿌리 고르게(칸 안) 안 걸림'); return; }
-  var cnt = new Map(), lastCell = -1;
-  function frac(v) { return v - Math.floor(v); }
-  W.growMannequinStrand = function (cell, NT, NP, E, X, CY) {
-    var s = inner.apply(this, arguments);
-    if (!RE.on || !s || !s.pts || !s.pts.length || !E || !(NT > 0) || !(NP > 0)) return s;
-    try {
-      if (cell < lastCell) cnt.clear(); lastCell = cell;                       // 새로 심기 시작
-      var k = cnt.get(cell) || 0; cnt.set(cell, k + 1);
-      var r = (cell / NT) | 0, c = cell % NT, o1 = frac(Math.sin(cell * 12.9898) * 43758.5453), o2 = frac(Math.sin(cell * 78.233) * 12345.6789);
-      var u = frac(o1 + k * 0.7548776662), v = frac(o2 + k * 0.5698402910);
-      var c0 = Math.cos(r / NP * Math.PI), c1 = Math.cos((r + 1) / NP * Math.PI), ph = Math.acos(Math.max(-1, Math.min(1, c0 - u * (c0 - c1)))), th = (c + v) / NT * 2 * Math.PI - Math.PI;
-      var p0 = s.pts[0], nx = p0.x / E.a, ny = (p0.y - CY) / E.b, nz = p0.z / E.c, rr = Math.sqrt(nx * nx + ny * ny + nz * nz);
-      if (!(rr > 1e-6)) return s;
-      var q = { x: E.a * rr * Math.sin(ph) * Math.sin(th), y: CY + E.b * rr * Math.cos(ph), z: E.c * rr * Math.sin(ph) * Math.cos(th) };
-      var dx = q.x - p0.x, dy = q.y - p0.y, dz = q.z - p0.z;
-      for (var i = 0; i < s.pts.length; i++) { var p = s.pts[i]; s.pts[i] = { x: p.x + dx, y: p.y + dy, z: p.z + dz }; }
-      RE.n++;
-    } catch (e) {}
-    return s;
-  };
-  console.log('[64] 마네킹 뿌리 칸 안에서 고르게(R2 수열 · 넓이 기준 극각) · 끄기 MQ_ROOT_EVEN.on=false');
 })();
