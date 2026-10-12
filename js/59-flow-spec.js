@@ -1103,6 +1103,9 @@
       }
       if (spec && sp && FS.save) {
         if (sp.base === 'regrown') spec.base = 'regrown';
+        // (2026-10-12t) 원본 머리(68번 = 다시 기른 길을 옮겨심은 것)를 보며 등록한 스타일도 마네킹 없이 — 사용자: "마네킨 모드로 저장하지 않은 건 마네킨 모드 꺼지게"
+        //   다른 손님에게 걸 때 그 손님의 다시 기른 머리 위에 얹음(위의 native 경로) · 예전 = FLOW_SPEC.origAsRegrown=false
+        try { if (FS.origAsRegrown !== false && W.ORIG_MQ && typeof W.ORIG_MQ.isOriginal === 'function' && W.ORIG_MQ.isOriginal() && W.READ_SHAPE && W.READ_SHAPE.on !== false) { spec.base = 'regrown'; console.log(TAG + ' 원본 머리에서 등록 — 마네킹 없이 거는 스타일로 저장(base regrown)'); } } catch (e) {}
         var fcB = null; try { fcB = FS.fromCombed(); } catch (e) { fcB = null; }             // (h) 빗질·넘기기가 있으면 그걸 건 가닥으로 다시 뽑은 표
         spec.flow = fcB || sp.flow; spec.flowBase = JSON.parse(JSON.stringify(sp.flowBase || {})); spec.flowLen = {};
         secOrder().forEach(function (sec) { var c = state.sections && state.sections[sec]; if (c && typeof c.length === 'number') spec.flowLen[sec] = c.length; });

@@ -197,18 +197,20 @@
     return 1;
   }
   function clumpKey(p) {
-    var votes = {}, best = 0, bk = 0, fr = PC.lockClumpFr, i, v;
+    var votes = {}, best = 0, bk = 0, fr = PC.lockClumpFr, i, v, hitOf = {};
     for (i = 0; i < fr.length; i++) {
       var q = p[Math.min(p.length - 1, Math.round(fr[i] * (p.length - 1)))];
       for (v = 0; v < CK.views.length; v++) {
         var V = CK.views[v]; if (!projectP(V.c, CK.env, q)) continue;
         var lx = Math.floor(pj[0] * V.kx), ly = Math.floor(pj[1] * V.ky); if (lx < 0 || ly < 0 || lx >= V.cl.W || ly >= V.cl.H) continue;
         var lb = V.cl.lab[ly * V.cl.W + lx]; if (!(lb > 0)) continue;
-        var key = (v + 1) * 40000 + lb; votes[key] = (votes[key] || 0) + 1; if (votes[key] > best) { best = votes[key]; bk = key; }
+        var key = (v + 1) * 40000 + lb; votes[key] = (votes[key] || 0) + 1; if (!hitOf[key]) hitOf[key] = { fr: fr[i], v: v }; if (votes[key] > best) { best = votes[key]; bk = key; }
       }
     }
+    lastHit = best >= PC.lockClumpVotes ? hitOf[bk] : null;
     return best >= PC.lockClumpVotes ? bk : 0;
   }
+  var lastHit = null;
   /* (2026-10-10b) 조각마다 컬 크기 — 조각 = 앞으로 드러난 반 바퀴(C·S자): 긴 축 길이(4σ) = 2.83 × 감기는 중심 반경 · 폭 = 타래 굵기 → 바깥 반경 = 길이 ÷ 2.83 + 폭 ÷ 2 (사진 조각 중앙값으로 약 1.2cm — 사진 전체 어림값과 비슷) */
   function clumpRcm(key) {
     if (!CK || !key) return 0;
@@ -530,7 +532,9 @@
       var ph = state._hair3Dneutral; if (ckPhoto !== ph) { prepClumps(); ckPhoto = ph; }
       if (!CK) return null;
       var k = clumpKey(p); if (!k) return null;
-      return { key: k, rCm: clumpRcm(k) };
+      var o = { key: k, rCm: clumpRcm(k) };
+      if (lastHit) { var R = CK.views[lastHit.v].c.R; o.frac = lastHit.fr; o.dir = [R[6], R[7], R[8]]; }   // (2026-10-12u) 조각을 본 사진 · 그 가닥이 조각을 지난 자리 — 그 자리에서 고리가 그 사진 쪽으로 드러나 있었음(조각 = 앞으로 드러난 반 바퀴)
+      return o;
     } catch (e) { return null; }
   };
   PC.lockOn = function () { try { var SH = blendShape(origSpec() || {}); return !!(PC.lockMode && SH && SH.w >= PC.lockW); } catch (e) { return false; } };
@@ -547,6 +551,7 @@
     var Am = 0, An = 0; for (b = 0; b < nb; b++) if (PF.A[b] > 0) { Am += PF.A[b]; An++; } Am = An ? Am / An : SH.A;
     var lockCm = Math.max(PC.lockMinCmAsIs, PC.lockDiaAsIs * 2 * Am);   // (2026-10-12m) 한 타래 크기 = 컬 지름 × lockDiaAsIs — 예전 7cm 칸이 통째로 같은 위상이라 한 고리에 가닥이 너무 많았음
     var t = LK ? 2 * Math.PI * hash3(rP.x * 41.3, rP.y * 17.9, rP.z * 63.1) + PC.lockJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5) : smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    var PP = [], E1 = [], E2 = [], TT = [], AU = [], SS = [];
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
       var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], bb = g[j + 1];
@@ -555,12 +560,21 @@
       var ox = px, oy = py - CY0, oz = pz, od = ox * tx + oy * ty + oz * tz; ox -= od * tx; oy -= od * ty; oz -= od * tz;
       var ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
       var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
-      var e1x = cf * bx + sf * ox, e1y = cf * by + sf * oy, e1z = cf * bz + sf * oz, e2x = -sf * bx + cf * ox, e2y = -sf * by + cf * oy, e2z = -sf * bz + cf * oz;
+      E1.push([cf * bx + sf * ox, cf * by + sf * oy, cf * bz + sf * oz]); E2.push([-sf * bx + cf * ox, -sf * by + cf * oy, -sf * bz + cf * oz]);
       var f = s / Lt * nb - 0.5, b0 = Math.max(0, Math.min(nb - 1, Math.floor(f))), b1 = Math.min(nb - 1, b0 + 1), q = Math.max(0, Math.min(1, f - b0)); q = q * q * (3 - 2 * q);
       var Acm = PF.A[b0] + (PF.A[b1] - PF.A[b0]) * q, Lcm = PF.L[b0] + (PF.L[b1] - PF.L[b0]) * q;
       t += 2 * Math.PI * (s - sPrev) * cpu / Math.max(0.3, Lcm); sPrev = s;   // 파장이 칸마다 달라도 위상이 끊기지 않게 쌓아 감
-      var wr = rootW(s, cpu), Au = Acm / cpu * wr, c1 = Au * Math.sin(t), c2 = Au * w * Math.cos(t);
-      out.push({ x: px + e1x * c1 + e2x * c2, y: py + e1y * c1 + e2y * c2, z: pz + e1z * c1 + e2z * c2 });
+      PP.push(px, py, pz); TT.push(t); AU.push(Acm / cpu * rootW(s, cpu)); SS.push(s);
+    }
+    var dT = 0;                                                            // (2026-10-12u) 읽은 위상 — 가닥이 사진 조각을 지난 자리에서 고리가 그 사진 쪽(카메라 쪽)으로 드러나도록 위상을 맞춤
+    if (LK && LK.dir && LK.frac != null && PC.readPhase !== false) {       //   가닥마다 제 길·제 자리에서 맞추므로 같은 조각이라도 위상이 조금씩 다름(한 점으로 겹치지 않음) · 끄기 PHOTO_CURL.readPhase=false
+      var sc = LK.frac * Lt, ic = 0; while (ic < SS.length - 1 && SS[ic] < sc) ic++;
+      var d = LK.dir, a1 = d[0] * E1[ic][0] + d[1] * E1[ic][1] + d[2] * E1[ic][2], a2 = d[0] * E2[ic][0] + d[1] * E2[ic][1] + d[2] * E2[ic][2];
+      if (Math.abs(a1) + Math.abs(a2) > 1e-3) { dT = Math.atan2(a1, a2 / Math.max(0.2, w)) - TT[ic]; mqS.readPh = (mqS.readPh || 0) + 1; }
+    }
+    for (i = 0; i < TT.length; i++) {
+      var c1 = AU[i] * Math.sin(TT[i] + dT), c2 = AU[i] * w * Math.cos(TT[i] + dT);
+      out.push({ x: PP[3 * i] + E1[i][0] * c1 + E2[i][0] * c2, y: PP[3 * i + 1] + E1[i][1] * c1 + E2[i][1] * c2, z: PP[3 * i + 2] + E1[i][2] * c1 + E2[i][2] * c2 });
     }
     mqS.allN = (mqS.allN || 0) + 1; mqS.allV = mqS.allV || {}; mqS.allV[PF.view] = (mqS.allV[PF.view] || 0) + 1;
     return out;
@@ -638,7 +652,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs + (PC.lockMode ? 'L' + PC.lockW + ':' + PC.lockJit : '') : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins + ':' + PC.lockDiaAsIs + (PC.lockMode ? 'L' + PC.lockW + ':' + PC.lockJit + (PC.readPhase !== false ? 'p' : '') : '') : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
