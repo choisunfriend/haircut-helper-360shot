@@ -538,19 +538,50 @@
     } catch (e) { return null; }
   };
   PC.lockOn = function () { try { var SH = blendShape(origSpec() || {}); return !!(PC.lockMode && SH && SH.w >= PC.lockW); } catch (e) { return false; } };
-  function shapeStrandAll(g, SH, LKin) {
+  /* (2026-10-12w) 자리 그대로 옮기기 — 사용자: "모양은 살았는데, 위치가 같진 않네"
+   *  원본 머리를 그릴 때 가닥마다 실제로 쓴 값(높이 5칸의 크기·한 번 길이 · 뿌리에서의 위상 · 감는 면)을 두피 칸(두피 타원의 위도 NP × 경도 NT · 48×24)마다 모아 둠.
+   *  스타일에 실어(exportShape · cells) 받는 손님은 뿌리의 두피 칸 값을 그대로 씀 → 같은 자리에서 같은 쪽으로 굽음. 칸 안 가닥끼리 위상이 흩어진 정도(원 평균 길이 R)도 읽어 그만큼만 흩음.
+   *  칸에 값이 없으면 예전(선 묶음에서 고름) · 끄기 PHOTO_CURL.cellMode=false */
+  PC.cellMode = true; PC.cellNT = 48; PC.cellNP = 24;   // 칸 ≈ 1.2cm(두피 둘레 기준)
+  var CELLREC = { photo: null, m: new Map() };
+  function scalpCell(r0, CYc) {
+    try {
+      var E = getScalpEllipsoid(); if (!E || !(E.a > 0)) return -1;
+      var cy = Math.max(-1, Math.min(1, (r0.y - CYc) / E.b)), ph = Math.acos(cy), th = Math.atan2(r0.x / E.a, r0.z / E.c);
+      var r = Math.max(0, Math.min(PC.cellNP - 1, Math.floor(ph / Math.PI * PC.cellNP))), c = Math.floor((th + Math.PI) / (2 * Math.PI) * PC.cellNT); c = ((c % PC.cellNT) + PC.cellNT) % PC.cellNT;
+      return r * PC.cellNT + c;
+    } catch (e) { return -1; }
+  }
+  function recordCell(ci, PF, t0, phi) {
+    if (ci < 0) return;
+    var ph = state._hair3Dneutral; if (CELLREC.photo !== ph) { CELLREC.photo = ph; CELLREC.m = new Map(); }
+    var c = CELLREC.m.get(ci); if (!c) { c = { n: 0, A: [0, 0, 0, 0, 0], L: [0, 0, 0, 0, 0], tc: 0, ts: 0, pc: 0, ps: 0 }; CELLREC.m.set(ci, c); }
+    var b; for (b = 0; b < 5 && b < PF.A.length; b++) { c.A[b] += PF.A[b]; c.L[b] += PF.L[b]; }
+    c.tc += Math.cos(t0); c.ts += Math.sin(t0); c.pc += Math.cos(2 * phi); c.ps += Math.sin(2 * phi); c.n++;
+  }
+  function cellsExport() {
+    var out = []; if (CELLREC.photo !== state._hair3Dneutral) return out;
+    CELLREC.m.forEach(function (c, ci) {
+      if (c.n < 1) return; var n = c.n, R = Math.hypot(c.tc, c.ts) / n, r3 = function (x) { return Math.round(x * 1000) / 1000; };
+      out.push([ci].concat(c.A.map(function (x) { return r3(x / n); }), c.L.map(function (x) { return r3(x / n); }), [r3(Math.atan2(c.ts, c.tc)), r3(R), r3(0.5 * Math.atan2(c.ps, c.pc)), n]));
+    });
+    return out;
+  }
+  PC.cellsExport = cellsExport;
+  function shapeStrandAll(g, SH, LKin, OV) {
     var LK = (LKin && PC.lockMode && SH.w >= PC.lockW) ? LKin : null, rP = LK ? { x: (LK.key % 997) * 0.0131, y: Math.floor(LK.key / 997) * 0.0173, z: (LK.key % 31) * 0.0217 } : g[0];
-    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, PF = profileFor(rP, SH); if (!PF) return null;
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, PF = OV ? { A: OV.A.slice(), L: OV.L.slice(), view: 'cell' } : profileFor(rP, SH); if (!PF) return null;
     var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
     var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
     var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
     var nb = PF.A.length, w = SH.w, useH = PC.gaborPitchFromHelix && SH.pH > 0, Lmin = 1e9, b;
-    if (LK && PC.lockRFromClump && LK.rCm > 0) for (b = 0; b < nb; b++) if (PF.A[b] > 0) PF.A[b] = LK.rCm;   // 그 조각에서 잰 컬 반경
+    if (!OV && LK && PC.lockRFromClump && LK.rCm > 0) for (b = 0; b < nb; b++) if (PF.A[b] > 0) PF.A[b] = LK.rCm;   // 그 조각에서 잰 컬 반경
+    if (OV) useH = false;
     for (b = 0; b < nb; b++) { PF.L[b] = useH ? (1 - w) * PF.L[b] + w * SH.pH : PF.L[b]; if (PF.L[b] < Lmin) Lmin = PF.L[b]; }
-    var r0 = g[0], phi = 2 * Math.PI * hash3(rP.x * 13.7, rP.y * 71.3, rP.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
+    var r0 = g[0], phi = OV ? OV.phi : 2 * Math.PI * hash3(rP.x * 13.7, rP.y * 71.3, rP.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
     var Am = 0, An = 0; for (b = 0; b < nb; b++) if (PF.A[b] > 0) { Am += PF.A[b]; An++; } Am = An ? Am / An : SH.A;
     var lockCm = Math.max(PC.lockMinCmAsIs, PC.lockDiaAsIs * 2 * Am);   // (2026-10-12m) 한 타래 크기 = 컬 지름 × lockDiaAsIs — 예전 7cm 칸이 통째로 같은 위상이라 한 고리에 가닥이 너무 많았음
-    var t = LK ? 2 * Math.PI * hash3(rP.x * 41.3, rP.y * 17.9, rP.z * 63.1) + PC.lockJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5) : smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    var t = OV ? OV.t0 : LK ? 2 * Math.PI * hash3(rP.x * 41.3, rP.y * 17.9, rP.z * 63.1) + PC.lockJit * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5) : smoothPhase(r0, lockCm), ds = Math.max(Math.min(Lmin / cpu / PC.ptsPerWave, Lt / 6), Lt / PC.maxPts), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
     var PP = [], E1 = [], E2 = [], TT = [], AU = [], SS = [];
     for (i = 0; i < m; i++) {
       var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
@@ -566,7 +597,7 @@
       t += 2 * Math.PI * (s - sPrev) * cpu / Math.max(0.3, Lcm); sPrev = s;   // 파장이 칸마다 달라도 위상이 끊기지 않게 쌓아 감
       PP.push(px, py, pz); TT.push(t); AU.push(Acm / cpu * rootW(s, cpu)); SS.push(s);
     }
-    var dT = 0;                                                            // (2026-10-12u) 읽은 위상 — 가닥이 사진 조각을 지난 자리에서 고리가 그 사진 쪽(카메라 쪽)으로 드러나도록 위상을 맞춤
+    var dT = 0; if (OV) LK = null;                                                           // (2026-10-12u) 읽은 위상 — 가닥이 사진 조각을 지난 자리에서 고리가 그 사진 쪽(카메라 쪽)으로 드러나도록 위상을 맞춤
     if (LK && LK.dir && LK.frac != null && PC.readPhase !== false) {       //   가닥마다 제 길·제 자리에서 맞추므로 같은 조각이라도 위상이 조금씩 다름(한 점으로 겹치지 않음) · 끄기 PHOTO_CURL.readPhase=false
       var sc = LK.frac * Lt, ic = 0; while (ic < SS.length - 1 && SS[ic] < sc) ic++;
       var d = LK.dir, a1 = d[0] * E1[ic][0] + d[1] * E1[ic][1] + d[2] * E1[ic][2], a2 = d[0] * E2[ic][0] + d[1] * E2[ic][1] + d[2] * E2[ic][2];
@@ -576,6 +607,7 @@
       var c1 = AU[i] * Math.sin(TT[i] + dT), c2 = AU[i] * w * Math.cos(TT[i] + dT);
       out.push({ x: PP[3 * i] + E1[i][0] * c1 + E2[i][0] * c2, y: PP[3 * i + 1] + E1[i][1] * c1 + E2[i][1] * c2, z: PP[3 * i + 2] + E1[i][2] * c1 + E2[i][2] * c2 });
     }
+    if (SH.rec) recordCell(scalpCell(g[0], CY0), PF, (TT.length ? TT[0] : 0) + dT, phi);   // (2026-10-12w) 원본에서 쓴 값을 두피 칸에 모음
     mqS.allN = (mqS.allN || 0) + 1; mqS.allV = mqS.allV || {}; mqS.allV[PF.view] = (mqS.allV[PF.view] || 0) + 1;
     return out;
   }
@@ -594,6 +626,7 @@
         bv[k] = o;
       }
       return { v: 1, A: +SH.A.toFixed(3), L: +SH.L.toFixed(3), w: +SH.w.toFixed(3), pH: SH.pH > 0 ? +SH.pH.toFixed(3) : 0,
+        cells: PC.cellMode ? cellsExport() : [], cellNT: PC.cellNT, cellNP: PC.cellNP,
         gab: { lamCm: +(+SH.gab.lamCm).toFixed(3), ampCm: +(+SH.gab.ampCm).toFixed(3), loop: +(+SH.gab.loop).toFixed(3), nAll: SH.gab.nAll, byView: bv } };
     } catch (e) { return null; }
   };
@@ -603,13 +636,24 @@
   PC.activeRS = rsSpec;
   PC.applyShapeRS = function (g, rs) {
     if (!PC.on || !g || g.length < 2 || !rs) return g;
-    var SH = { A: rs.A, L: rs.L, w: rs.w, depth: rs.w, pH: rs.pH, gab: rs.gab };
+    var SH = { A: rs.A, L: rs.L, w: rs.w, depth: rs.w, pH: rs.pH, gab: rs.gab }, OV = null;
     mqS.rs = (mqS.rs || 0) + 1;
-    return shapeStrandAll(g, SH, null) || g;
+    if (PC.cellMode && rs.cells && rs.cells.length && rs.cellNT === PC.cellNT && rs.cellNP === PC.cellNP) {
+      if (rs._cm !== rs.cells) { rs._cmap = new Map(); rs.cells.forEach(function (c) { rs._cmap.set(c[0], c); }); rs._cm = rs.cells; }
+      var CYt = 0; try { CYt = (state._hair3Dneutral && state._hair3Dneutral.CY) || (G && G.model && G.model.CY) || 0; } catch (e) {}
+      var c = rs._cmap.get(scalpCell(g[0], CYt));
+      if (c) {
+        var R = Math.max(1e-3, Math.min(1, c[12])), sd = Math.sqrt(-2 * Math.log(R)), r0 = g[0];   // 칸 안 가닥끼리 흩어진 정도(원본에서 읽은 값)만큼 위상을 흩음
+        OV = { A: c.slice(1, 6), L: c.slice(6, 11), t0: c[11] + sd * 1.7 * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5) * 2, phi: c[13] };
+        mqS.rsCell = (mqS.rsCell || 0) + 1;
+      }
+    }
+    return shapeStrandAll(g, SH, null, OV) || g;
   };
   PC.applyShape = function (g, lk) {                                     // (2026-10-12j) 68번이 옮겨심은 축에 사진 선 굴곡을 얹음 · lk = 그 가닥의 사진 타래 조각
     if (!PC.on || !PC.gaborAll || !g || g.length < 2) return g;
     var SH = blendShape(origSpec() || {}); if (!SH || !SH.gab) return g;
+    if (PC.cellMode) SH = Object.assign({}, SH, { rec: true });
     return shapeStrandAll(g, SH, lk) || g;
   };
   /* (2026-10-11c) ① 감은 컬이 좁은 덩어리(42번 여유 둔 교집합) 밖으로 부푼 점은 축 쪽으로 당겨 넣음 — 자르지 않음 */
