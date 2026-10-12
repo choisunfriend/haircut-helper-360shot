@@ -61,7 +61,10 @@
   'use strict';
   var W = window, TAG = '[어깨]';
   var H = W.SHOULDER = Object.assign({
-    on: false,          // (2026-10-07) 기본 끔 — 머리가 만들어진 그대로 내려감. 켜기: SHOULDER.on=true; SHOULDER.refresh()
+    on: true,           // (2026-10-12g) 다시 켬 — 아래 natural 방식으로만(긴 웨이브 손님: 몸통을 통과한 아랫머리가 뜯겨 보임). 예전 기본 = false
+    natural: true,      // (2026-10-12g) 자연스럽게 놓기 — 몸통 안에 든 점만, 그 가닥이 몸통에 들어가기 직전 자리에서 가까운 면(앞/등)으로 밀어 얹음.
+                        //   앞·뒤로 강제로 보내지 않고 · 몸통 밖에 뜬 점은 안 건드리고 · 목 구간은 안 건드림(10/7의 목 가로줄 원인 = '전부 등 쪽으로' 강제) · false = 아래 예전 규칙
+    on_was: false,      // (2026-10-07) 기본 끔 — 머리가 만들어진 그대로 내려감. 켜기: SHOULDER.on=true; SHOULDER.refresh()
     preload: true,      // 스타일·조정 화면에서 몸통 메쉬를 미리 불러와 잼
     cell: 0.05,         // 격자 한 칸(모델 단위 ≈ 0.9cm)
     xMax: 1.5,          // 좌우 범위(≈ 27cm — 어깨 끝 + 팔 윗부분)
@@ -254,6 +257,18 @@
   /* ── ② 몸통 밖으로 ─────────────────────────────────────────────────────── */
   function pushPoint(q, prev, st) {
     var g = grid;
+    if (H.natural) {                                 // (2026-10-12g) 몸통 안에 든 점만 가까운 면으로 — 목·몸통 밖은 그대로
+      if (q.y > g.yTop || q.y <= g.yBot) return q;
+      var ax2 = q.x < 0 ? -q.x : q.x; if (ax2 >= g.xMax) return q;
+      var ix2 = ax2 / g.cell | 0, k2 = ((g.yTop - q.y) / g.cell | 0) * g.NX + ix2, zf2 = g.ZF[k2];
+      if (zf2 === -Infinity) return q;
+      var zb2 = g.ZB[k2], m2 = H.margin;
+      if (!(q.z > zb2 - m2 && q.z < zf2 + m2)) return q;
+      if (!st.pref) { var ref2 = prev ? prev.z : q.z; st.pref = ref2 > (zf2 + zb2) / 2 ? 'front' : 'back'; S.touched++; if (st.pref === 'front') S.front++; else S.back++; }
+      var dUp2 = g.TOP[ix2] + m2 - q.y, dZ2 = st.pref === 'front' ? zf2 + m2 - q.z : q.z - (zb2 - m2);
+      if (dUp2 >= 0 && dUp2 < H.restMax && dUp2 < dZ2) { S.rest++; return { x: q.x, y: g.TOP[ix2] + m2, z: q.z }; }   // 어깨 위에 얹음
+      return { x: q.x, y: q.y, z: st.pref === 'front' ? zf2 + m2 : zb2 - m2 };
+    }
     if (q.y > g.yTop) {                              // 목 구간 — 42번의 목 기둥
       var NK = W.REGROW && W.REGROW.neckPush;
       if (NK) { var r0 = NK(q); if (r0 !== q) { S.neck++; return r0; } }
@@ -347,7 +362,7 @@
   // 서명 — 어깨가 새로 재지거나 꺼지면 미리 만든 헤어도 다시
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
-    return origFS.apply(this, arguments) + '|sh' + (H.on && grid ? ver : 0);
+    return origFS.apply(this, arguments) + '|sh' + (H.on && grid ? ver + (H.natural ? 'n' : '') : 0);
   };
 
   function redraw() {

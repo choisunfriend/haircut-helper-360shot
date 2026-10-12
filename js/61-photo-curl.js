@@ -348,17 +348,18 @@
   function waveShape() {
     var key = ''; try { key = (state._hair3Dneutral ? 1 : 0) + '|' + (G && G.model ? G.model.strands.length : 0); } catch (e) {}
     if (wsMemo.key === key && wsMemo.v) return wsMemo.v;
-    var loops = [], lams = [], amps = [], views = [];
+    var loops = [], lams = [], amps = [], views = [], byView = {}, nAll = 0;
     (typeof ANGLES !== 'undefined' ? ANGLES : ['front', 'left', 'right', 'back']).forEach(function (a) {
       try {
         var id = state.hairMasks && state.hairMasks[a] && state.hairMasks[a].identity, ws = id && id.waveShape; if (!ws || !(ws.bent >= 20)) return;
         var cpp = G && G.cmPerMaskPx ? G.cmPerMaskPx(a) : null; if (!(cpp > 0)) return;
         if (isFinite(ws.loop)) loops.push(ws.loop); if (isFinite(ws.lamPx)) lams.push(ws.lamPx * cpp); if (isFinite(ws.ampPx)) amps.push(ws.ampPx * cpp);
+        if (ws.all && ws.all.length) { byView[a] = ws.all.map(function (l) { return [l[0], l[1], l[2] * cpp, l[3] * cpp, l[4], l[5]]; }); nAll += ws.all.length; }
         views.push(a + ' 고리 ' + (+ws.loop).toFixed(2) + ' · 파장 ' + (ws.lamPx * cpp).toFixed(1) + ' · 진폭 ' + (ws.ampPx * cpp).toFixed(2) + 'cm');
       } catch (e) {}
     });
     function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : NaN; }
-    var v = { loop: med(loops), lamCm: med(lams), ampCm: med(amps), views: views };
+    var v = { loop: med(loops), lamCm: med(lams), ampCm: med(amps), views: views, byView: byView, nAll: nAll };
     v.isWave = isFinite(v.loop) && v.loop < PC.waveLoopMax && v.lamCm > 1 && v.ampCm > 0.05;
     wsMemo = { key: key, v: v };
     try { console.log(TAG + ' ② 사진 선 모양 — ' + (v.isWave ? '웨이브(S자)' : '컬(고리)') + ' · 고리 정도 ' + (+v.loop).toFixed(2) + '(웨이브 기준 ' + PC.waveLoopMax + ' 미만) · 파장 ' + (+v.lamCm).toFixed(1) + 'cm · 진폭 ' + (+v.ampCm).toFixed(2) + 'cm · ' + views.join(' | ')); } catch (e) {}
@@ -405,7 +406,7 @@
    *        다시 기른 머리 화면(뭉침 모양이 걸리는 쪽)에서도 같은 식으로 그림(사진 선이 있을 때). 사진 선이 없으면 예전 그대로.
    *  뿌리: 모든 가닥이 뿌리에서 rootStraightCm 만큼은 곧게(굴곡 0) · 그 뒤 shapeRootCm에 걸쳐 같은 곡선으로 서서히 — 읽은 굴곡 장(⑤)도 같은 비율로.
    *  예전 = PHOTO_CURL.gaborAsIs=false; PHOTO_CURL.rootStraightCm=0 후 PHOTO_CURL.refresh() */
-  PC.gaborAsIs = true; PC.rootStraightCm = 1.0;
+  PC.gaborAsIs = true; PC.rootStraightCm = 1.0; PC.gaborPitchFromHelix = true;
   function rootW(s, cpu) {                                                // 뿌리 펴기 — 모든 가닥 같은 곡선(곧게 rootStraightCm → shapeRootCm에 걸쳐 0→1)
     var s0 = (PC.rootStraightCm || 0) / cpu, rr = Math.max(1e-6, (PC.shapeRootCm || 0) / cpu), w = (s - s0) / rr;
     if (w <= 0) return 0; if (w >= 1) return 1; return w * w * (3 - 2 * w);
@@ -439,13 +440,15 @@
       var wl0 = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), ws0 = cl((ws.ampCm / ws.lamCm - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
       w = Math.max(wl0, ws0);
       A = ws.ampCm; L = ws.lamCm; src = '방향 필터 그대로';
+      // (2026-10-12h) 컬 쪽(w)은 한 바퀴 길이만 나선 측정으로 — 방향 필터 선은 촘촘한 컬의 꺾임을 따라가지 못해 큰 흐름의 굴곡을 잼(짧은 곱슬: 선 5.2cm · 나선 측정 2.1~2.7cm → 늘어난 스프링 = 웨이브로 보임)
+      if (PC.gaborPitchFromHelix && pH > 0) { L = (1 - w) * ws.lamCm + w * pH; src = '방향 필터 그대로 · 한 바퀴는 나선 측정 ×' + w.toFixed(2); }
     } else if (ws && isFinite(ws.loop) && ws.lamCm > 0 && ws.ampCm > 0) {
       var wl = cl((ws.loop - PC.shapeLoop[0]) / (PC.shapeLoop[1] - PC.shapeLoop[0])), stp = ws.ampCm / ws.lamCm, wsx = cl((stp - PC.shapeSteep[0]) / (PC.shapeSteep[1] - PC.shapeSteep[0]));
       w = (wl + wsx) / 2;
       A = rH ? (1 - w) * ws.ampCm + w * rH : ws.ampCm; L = pH ? (1 - w) * ws.lamCm + w * pH : ws.lamCm; src = '사진 선 + 나선 측정';
     } else if (rH && pH) { A = rH; L = pH; src = '나선 측정만'; }
     else return null;
-    var v = { A: A, L: L, w: w, depth: w };
+    var v = { A: A, L: L, w: w, depth: w, pH: pH, gab: (PC.gaborAsIs && ws && ws.byView && ws.nAll > 0) ? ws : null };
     bsMemo = { key: key + '|' + (ws ? ws.loop : ''), v: v };
     mqS.shapeTxt = '고리 정도 ' + (ws ? (+ws.loop).toFixed(2) : '-') + ' · 가파름 ' + (ws ? (ws.ampCm / ws.lamCm).toFixed(3) : '-') + ' → 나선 쪽 ' + w.toFixed(2) + ' · 크기 ' + A.toFixed(2) + 'cm · 한 번 ' + L.toFixed(1) + 'cm · 앞뒤 굴곡 ×' + w.toFixed(2) + ' (' + src + ')';
     try { console.log(TAG + ' ③ 컬 모양(기준선 없음) — ' + mqS.shapeTxt); } catch (e) {}
@@ -455,7 +458,36 @@
     var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, k = 2 * Math.PI / (PC.phaseWaveCm / cpu);
     return Math.PI * (Math.sin(r0.x * k + 1.3) + Math.sin(r0.y * k * 0.83 + 2.1) + Math.sin(r0.z * k * 1.17 + 0.4)) + (PC.gaborAsIs ? PC.phaseJitAsIs : PC.phaseJit) * (hash3(r0.x * 91, r0.y * 37, r0.z * 53) - 0.5);
   }
+  /* (2026-10-12i) 선 하나하나 그대로 — 사용자: "정보를 중앙값만 갖고 오지 말고 다 가져와 · 머리가 밧줄처럼 일자 · 굴곡지면서 퍼져야"
+   *  가닥마다: 뿌리 방위로 그 자리를 마주 본 사진을 고르고(앞·뒤·옆) · 가닥을 위→아래 5칸으로 나눠 칸마다 그 사진의 같은 높이에서 그은 선 하나를 뽑음(가닥마다 다른 선)
+   *    → 파장·진폭이 가닥마다·높이마다 사진대로 다름(곧은 선을 뽑은 칸은 굴곡 0 · 뿌리 쪽이 곧고 끝으로 갈수록 크게 출렁이는 모양이 사진에서 그대로)
+   *  물결 면을 가닥(뿌리 자리)마다 돌림: 옆으로만 흔들리던 것(밧줄) → 옆·바깥 사이 어느 면 → 머리가 바깥으로 퍼짐
+   *  끄기 PHOTO_CURL.gaborAll=false 후 PHOTO_CURL.refresh() */
+  PC.gaborAll = true; PC.gaborBins = 5; PC.gaborBinTol = [0.12, 0.25];
+  function viewForRoot(r) {
+    var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
+    var az = Math.atan2(r.x, r.z) * 180 / Math.PI, a = Math.abs(az);
+    return a < 45 ? 'front' : a > 135 ? 'back' : (az > 0 ? 'left' : 'right');
+  }
+  function profileFor(r0, SH) {
+    var bv = SH.gab.byView, v = viewForRoot(r0), Ls = bv[v] || bv.front || bv.back || bv.left || bv.right; if (!Ls || !Ls.length) return null;
+    var nb = PC.gaborBins, A = [], L = [], b, lamMed = SH.gab.lamCm > 0 ? SH.gab.lamCm : SH.L;
+    for (b = 0; b < nb; b++) {
+      var fc = (b + 0.5) / nb, pick = null, k, t, cand;
+      for (t = 0; t < PC.gaborBinTol.length && !pick; t++) {
+        cand = Ls.filter(function (l) { return Math.abs(l[0] - fc) < PC.gaborBinTol[t]; });
+        if (cand.length >= 3) pick = cand;
+      }
+      if (!pick) pick = Ls;
+      k = Math.floor(hash3(r0.x * 53 + b * 7.1, r0.y * 17 + b, r0.z * 29) * pick.length) % pick.length;
+      var l = pick[k];
+      if (l[5] || !(l[3] > 0)) { A.push(0); L.push(lamMed); }
+      else { A.push(l[3]); L.push(l[2] > 1 ? l[2] : lamMed); }
+    }
+    return { A: A, L: L, view: v };
+  }
   function shapeStrand(g, SH) {
+    if (PC.gaborAll && SH.gab) { var rA = shapeStrandAll(g, SH); if (rA) return rA; }
     var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, Au = SH.A / cpu, Lu = SH.L / cpu, ru = PC.shapeRootCm / cpu;
     var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
     var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
@@ -480,6 +512,33 @@
       }
       out.push({ x: px + rx + fill * (bx * c1 + ox * c2), y: py + ry + fill * (by * c1 + oy * c2), z: pz + rz + fill * (bz * c1 + oz * c2) });
     }
+    return out;
+  }
+  function shapeStrandAll(g, SH) {
+    var cpu = (typeof CURL_BUNDLE !== 'undefined' && CURL_BUNDLE.cmPerUnit) || 19.33, PF = profileFor(g[0], SH); if (!PF) return null;
+    var CY0 = 0; try { CY0 = (G && G.model && G.model.CY) || (state._hair3Dneutral && state._hair3Dneutral.CY) || 0; } catch (e) {}
+    var S = [0], i; for (i = 1; i < g.length; i++) S.push(S[i - 1] + Math.hypot(g[i].x - g[i - 1].x, g[i].y - g[i - 1].y, g[i].z - g[i - 1].z));
+    var Lt = S[S.length - 1]; if (!(Lt > 1e-6)) return g;
+    var nb = PF.A.length, w = SH.w, useH = PC.gaborPitchFromHelix && SH.pH > 0, Lmin = 1e9, b;
+    for (b = 0; b < nb; b++) { PF.L[b] = useH ? (1 - w) * PF.L[b] + w * SH.pH : PF.L[b]; if (PF.L[b] < Lmin) Lmin = PF.L[b]; }
+    var r0 = g[0], phi = 2 * Math.PI * hash3(r0.x * 13.7, r0.y * 71.3, r0.z * 37.9), cf = Math.cos(phi), sf = Math.sin(phi);
+    var t = smoothPhase(r0), ds = Math.min(Lmin / cpu / 24, Lt / 6), m = Math.max(3, Math.ceil(Lt / ds) + 1), out = [], j = 0, sPrev = 0;
+    for (i = 0; i < m; i++) {
+      var s = Math.min(Lt, i * ds); while (j < g.length - 2 && S[j + 1] < s) j++;
+      var u = (s - S[j]) / Math.max(1e-12, S[j + 1] - S[j]), a = g[j], bb = g[j + 1];
+      var px = a.x + (bb.x - a.x) * u, py = a.y + (bb.y - a.y) * u, pz = a.z + (bb.z - a.z) * u;
+      var tx = bb.x - a.x, ty = bb.y - a.y, tz = bb.z - a.z, tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      var ox = px, oy = py - CY0, oz = pz, od = ox * tx + oy * ty + oz * tz; ox -= od * tx; oy -= od * ty; oz -= od * tz;
+      var ol = Math.hypot(ox, oy, oz) || 1; ox /= ol; oy /= ol; oz /= ol;
+      var bx = ty * oz - tz * oy, by = tz * ox - tx * oz, bz = tx * oy - ty * ox, bl = Math.hypot(bx, by, bz) || 1; bx /= bl; by /= bl; bz /= bl;
+      var e1x = cf * bx + sf * ox, e1y = cf * by + sf * oy, e1z = cf * bz + sf * oz, e2x = -sf * bx + cf * ox, e2y = -sf * by + cf * oy, e2z = -sf * bz + cf * oz;
+      var f = s / Lt * nb - 0.5, b0 = Math.max(0, Math.min(nb - 1, Math.floor(f))), b1 = Math.min(nb - 1, b0 + 1), q = Math.max(0, Math.min(1, f - b0)); q = q * q * (3 - 2 * q);
+      var Acm = PF.A[b0] + (PF.A[b1] - PF.A[b0]) * q, Lcm = PF.L[b0] + (PF.L[b1] - PF.L[b0]) * q;
+      t += 2 * Math.PI * (s - sPrev) * cpu / Math.max(0.3, Lcm); sPrev = s;   // 파장이 칸마다 달라도 위상이 끊기지 않게 쌓아 감
+      var wr = rootW(s, cpu), Au = Acm / cpu * wr, c1 = Au * Math.sin(t), c2 = Au * w * Math.cos(t);
+      out.push({ x: px + e1x * c1 + e2x * c2, y: py + e1y * c1 + e2y * c2, z: pz + e1z * c1 + e2z * c2 });
+    }
+    mqS.allN = (mqS.allN || 0) + 1; mqS.allV = mqS.allV || {}; mqS.allV[PF.view] = (mqS.allV[PF.view] || 0) + 1;
     return out;
   }
   PC.blendShape = blendShape; PC._shapeStrand = shapeStrand;
@@ -550,7 +609,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
+    try { var a = lookActive(), om = origSpec(); if (om) s += '|pmq' + [om.curl, om.rCm, om.pitchCm, PC.mqWind, PC.mqRootLeave, PC.mqStretch, PC.gaborAsIs ? 'g' + PC.rootStraightCm + ':' + PC.shapeRootCm + ':' + PC.phaseJitAsIs + ':2' + (PC.gaborPitchFromHelix ? 'h' : '') + (PC.gaborAll ? 'a' + PC.gaborBins : '') : 0, PC.readWave ? 'rw' + PC.readGainMax + (PC.readFill ? 'f' : '') + ((G && G.waveField && G.waveField()) ? 1 : 0) : 0].join(','); return s + '|pcl' + (a ? [PC.look.pitchThick, PC.look.clumpPull, PC.look.phaseJitter, PC.look.microAmp].join(',') + (PC.lock ? 'L' + lver + ':' + lockSig() : '') : 0); } catch (e) { return s; }
   };
 
   PC.lines = function () {
