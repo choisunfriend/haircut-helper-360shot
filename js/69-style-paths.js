@@ -175,7 +175,7 @@
       } catch (e) { if (!ST.err) console.warn(TAG + ' 적용 실패 — 예전 경로', e); ST.err = String(e && e.message || e); }
     }
     var out = prevAdj.apply(this, arguments);
-    try { if (SP.on && s && s.mannequin && s.pts && lenOverride === undefined && styOverride === undefined && isOrig()) record(s, out); } catch (e) {}
+    try { if (SP.on && s && s.mannequin && s.pts && isOrig()) record(s, out); } catch (e) {}   // (2026-10-13b) 길이·스타일 인자가 늘 넘어와서 예전 조건으로는 한 번도 기록이 안 됐음(진단 "기록한 칸 0")
     return out;
   };
   else console.warn(TAG + ' adjustStrandGeom이 없어 스타일 길을 못 씁니다');
