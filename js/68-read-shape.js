@@ -44,7 +44,8 @@
   'use strict';
   var W = window, TAG = '[읽은 모양]';
   var RS = W.READ_SHAPE = Object.assign({
-    on: true,            // B·C
+    fixRev: true,        // (2026-10-13d) 옮겨심기를 꺼도 거꾸로 선 마네킹 가닥만 바른 이웃 모양으로
+    on: false,           // B·C — (2026-10-13c) 끔: 원본 머리 = 마네킹 가닥 + 잰 값(컬·웨이브는 61번이 마네킹 위에서 감음). 사용자: "가닥이랑 자꾸 문제돼서 마네킨 기반으로 비교" · 주소 끝 ?rs=1 이면 예전(옮겨심기)
     waveRaw: false,      // A — (2026-10-12j) 끔: 웨이브도 42번 축(방향 필터 파장으로 고른 결)으로 걷고 굴곡은 61번이 얹음. 켜면 예전(읽은 길 그대로)
     evenRoots: true,     // D
     rootLow: 0.6,        // D: 보통 밀도의 이 비율 미만 칸은 손대지 않음(대머리·숱 적은 곳 후보 — 64번이 덩어리 크기로 가름)
@@ -57,12 +58,11 @@
     rootCell: 0.04,      // B: 뿌리 찾기 칸(≈ 0.8cm)
     reach: 4,            // B
     maxPts: 48,
-    offKeepCm: 0.5, offFadeCm: 3,
-    farCm: 1.5,          // (2026-10-13b) 본보기 뿌리가 이보다 멀면(사진에 머리가 없는 자리) 그리지 않음
-    strayOn: true, strayOut: 0.2, strayCos: 0.45, strayCurlMax: 30,   // (2026-10-13b) 엇나간 본보기 빼기   // (2026-10-13a) 본보기와 뿌리가 떨어진 만큼 길 전체를 옮기지 않고 3cm에 걸쳐 0.5cm까지 붙임
+    offKeepCm: 0.5, offFadeCm: 3,   // (2026-10-13a) 본보기와 뿌리가 떨어진 만큼 길 전체를 옮기지 않고 3cm에 걸쳐 0.5cm까지 붙임
     lockPull: 0, lockRootCm: 1.5,   // (2026-10-12u) 0: 대표 길로 당기지 않음 — 한 조각의 가닥이 한 줄로 겹쳐 뭉치가 됐음. 타래는 같은 조각 = 같은 사진 선 + 가닥마다 읽은 위상(61번)으로 · 예전 0.85   // (2026-10-12s) 사진 타래 조각의 대표 길로 당기는 정도(0 = 당기지 않고 위상·크기만 같게) · (2026-10-12q) 컬 타래로 당기는 정도 · 뿌리에서 이 길이에 걸쳐 서서히 — 0 = 안 모음          // (2026-10-12o) 옮겨심은 길의 점 수 상한(웨이브 한 번에 8점쯤) · 0 = 그대로
     shape: true          // (2026-10-12j) 옮겨심은 축에 61번 굴곡(방향 필터 선 그대로)을 얹음 · false = 축만: 이 칸 수까지 넓혀 찾음(넘으면 예전 경로)
   }, W.READ_SHAPE || {});
+  try { var rsQ = /[?&]rs=([0-9]+)/.exec(String(location.search || '')); if (rsQ) RS.on = +rsQ[1] > 0; } catch (e) {}
   var ST = RS.stats = { built: null, used: 0, fell: 0, curlAdd: 0, wave: null, roots: null, err: null };
   var G = W.REGROW;
 
@@ -140,26 +140,6 @@
       if (isRev) { rev++; if (fl) revFlip++; }
       info[i] = { L: L, rev: isRev, r: q[0] };
     }
-    // (2026-10-13b) 엇나간 본보기 — 사용자: "직모 옆으로 가닥들이 생기네"
-    //   기른 가닥의 5%쯤은 잔머리·엇나간 가닥(결 표가 빼는 것)인데 본보기로는 그대로 쓰여, 그 근처 마네킹 뿌리 여러 개가 같은 엇나간 길을 받아 옆으로 뜬 가닥 줄이 됨.
-    //   ① 3D 머리 덩어리 밖을 지나는 점이 strayOut 넘게 많은 가닥 ② (직모·웨이브 — 잰 컬 strayCurlMax 미만) 길 전체에서 그 자리 흐름과의 평균 cos가 strayCos 미만인 가닥 → 본보기에서 뺌(이웃 바른 가닥 모양을 받음)
-    var VC = (G && (G.volT || G.vol)) || null, curlM = 0, strayN = 0, strayV = 0;
-    try { var spx = W.ORIG_MQ && W.ORIG_MQ.spec; curlM = (spx && spx.perm && spx.perm.curl) || 0; } catch (e) {}
-    if (RS.strayOn) for (i = 0; i < n; i++) {
-      var f0 = info[i]; if (!f0 || f0.rev) continue;
-      var q2 = S[i].pts, outN = 0, tot = 0, cs = 0, cn = 0;
-      for (j = 1; j < q2.length; j++) {
-        tot++;
-        if (VC) { try { if (VC.at(q2[j]) === 0) outN++; } catch (e) {} }
-        if (curlM < RS.strayCurlMax) {
-          var fx = q2[j].x - q2[j - 1].x, fy = q2[j].y - q2[j - 1].y, fz = q2[j].z - q2[j - 1].z, fl2 = Math.sqrt(fx * fx + fy * fy + fz * fz); if (!(fl2 > 1e-9)) continue;
-          var c3 = flow.get(keyOf(Math.floor(q2[j].x / V), Math.floor(q2[j].y / V), Math.floor(q2[j].z / V)));
-          if (c3 && c3[3] - 1 >= RS.revMinN) { var gx = c3[0] - fx / fl2, gy = c3[1] - fy / fl2, gz = c3[2] - fz / fl2, gl = Math.sqrt(gx * gx + gy * gy + gz * gz); if (gl > 0.5) { cs += (fx * gx + fy * gy + fz * gz) / (fl2 * gl); cn++; } }
-        }
-      }
-      if (tot && outN / tot > RS.strayOut) { f0.rev = true; strayV++; continue; }
-      if (cn >= 4 && cs / cn < RS.strayCos) { f0.rev = true; strayN++; }
-    }
     // 짧게 막힌 가닥 — 뿌리 칸(2cm) 이웃 길이 중앙값 대비
     var RC = RS.rootCell, rc = new Map();
     for (i = 0; i < n; i++) { var f = info[i]; if (!f) continue; var kk = keyOf(Math.floor(f.r.x / (RC * 2)), Math.floor(f.r.y / (RC * 2)), Math.floor(f.r.z / (RC * 2))), a = rc.get(kk); if (!a) rc.set(kk, a = []); a.push(f.L); }
@@ -172,7 +152,7 @@
       var k3 = keyOf(Math.floor(g.r.x / RC), Math.floor(g.r.y / RC), Math.floor(g.r.z / RC)), b = cells.get(k3);
       if (!b) cells.set(k3, b = []); b.push(i); good++;
     }
-    ST.built = { strayV: strayV, strayN: strayN, n: n, good: good, rev: rev, revRoot: revRoot, revFlip: revFlip, flipN: flipN, short: shortN, vox: flow.size, ms: Date.now() - t0 };
+    ST.built = { n: n, good: good, rev: rev, revRoot: revRoot, revFlip: revFlip, flipN: flipN, short: shortN, vox: flow.size, ms: Date.now() - t0 };
     try { console.log(TAG + ' 본보기 — 기른 가닥 ' + n + ' 중 ' + good + '개 · 거꾸로 자란 가닥 ' + rev + '(그중 42번이 위로 뒤집어 기른 것 ' + revFlip + '/' + flipN + ') · 짧게 막힌 가닥 ' + shortN + ' · ' + ST.built.ms + 'ms'); } catch (e) {}
     return { m: m, arr: S, cells: cells };
   }
@@ -224,6 +204,12 @@
     ST.locked = (ST.locked || 0) + 1; out.pts = o;
     return out;
   }
+  function initDir(q) {   // 뿌리에서 ≈3cm 지점까지의 방향
+    if (!q || q.length < 2) return null; var L = 0, k, lim = 3 / cpu();
+    for (k = 1; k < q.length; k++) { L += Math.hypot(q[k].x - q[k - 1].x, q[k].y - q[k - 1].y, q[k].z - q[k - 1].z); if (L >= lim) break; }
+    k = Math.min(k, q.length - 1); var x = q[k].x - q[0].x, y = q[k].y - q[0].y, z = q[k].z - q[0].z, l = Math.sqrt(x * x + y * y + z * z);
+    return l > 1e-9 ? [x / l, y / l, z / l] : null;
+  }
   function nearest(ix, p) {
     var RC = RS.rootCell, cx = Math.floor(p.x / RC), cy = Math.floor(p.y / RC), cz = Math.floor(p.z / RC), best = -1, bd = Infinity, r, a, b, c;
     for (r = 0; r <= RS.reach; r++) {
@@ -266,7 +252,6 @@
         var ix = index();
         if (ix) {
           var mem = s._rsh;
-          if (mem && mem.ix === ix && mem.stub) return mem.stub;
           if (!mem || mem.ix !== ix) {
             var root = s.pts[0], bi = nearest(ix, root), pts = null;
             if (bi >= 0) {
@@ -275,11 +260,7 @@
               // (2026-10-13a) 목·옆머리 잔가닥 — 사진에 머리가 없어 안 심은 뿌리(목선·귀 둘레) 자리의 마네킹 뿌리는 몇 cm 떨어진 본보기 길을
               //   통째로 옮겨 왔음 → 길 전체가 그만큼 비켜 3D 머리 덩어리 밖(목 앞·귀 옆 공중)으로 나감. 이제 뿌리에서 offFadeCm에 걸쳐
               //   비킨 거리를 offKeepCm까지 줄여 본보기 길 옆으로 붙임(같은 길로 겹치지는 않게 조금 남김). 끄기 READ_SHAPE.offFadeCm=0
-              var dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
-              // (2026-10-13b) 목 가닥 — 사진에 머리가 없어 기른 가닥이 없는 자리(목선 아래·귀 뒤)의 마네킹 뿌리는 멀리(1.5~3cm) 있는 본보기 길을 받아,
-              //   그 길까지 목 피부를 가로질러 가는 짧은 선("ㄴ" 모양)이 됨. 사진대로 그 자리는 머리가 없는 것이므로 그리지 않음(두피에 붙은 0.1mm 점). 끄기 READ_SHAPE.farCm=0
-              if (RS.farCm > 0 && dl * cpu() > RS.farCm) { ST.farSkip = (ST.farSkip || 0) + 1; var tip = { x: root.x + (root.x) * 1e-4, y: root.y + 1e-5, z: root.z + root.z * 1e-4 }; mem = s._rsh = { ix: ix, pts: null, stub: [root, tip] }; return mem.stub; }
-              var keepU = RS.offKeepCm / cpu(), fadeU = RS.offFadeCm / cpu(), acc = 0;
+              var dl = Math.sqrt(dx * dx + dy * dy + dz * dz), keepU = RS.offKeepCm / cpu(), fadeU = RS.offFadeCm / cpu(), acc = 0;
               var fr = (RS.offFadeCm > 0 && dl > keepU) ? keepU / dl : 1;
               if (fr < 1) ST.offPulled = (ST.offPulled || 0) + 1;
               for (k = 0; k < src.length; k++) {
@@ -303,6 +284,37 @@
       } catch (e) { if (!ST.err) console.warn(TAG + ' 옮겨심기 실패 — 예전 경로', e); ST.err = String(e && e.message || e); }
     }
     var outA = prevAdj.apply(this, arguments);
+    // (2026-10-13d) 마네킹 기준 원본(옮겨심기 꺼짐)에서도 거꾸로 선 가닥만 고침 — 사용자: "웨이브 여자 머리 더듬이가 반대 결 쪽으로 갔어"
+    //   예전엔 옮겨심기(B) 안에서 C(거꾸로 자란 본보기 빼기)로 막았는데, 옮겨심기를 끄면서 같이 빠졌음.
+    //   지금: 마네킹 가닥의 처음 방향(뿌리에서 ≈3cm)이 그 자리 바른 기른 가닥들의 처음 방향과 반대(cos < revCos)면 그 가닥만 이웃 바른 가닥 모양으로 옮겨 심음. 끄기 READ_SHAPE.fixRev=false
+    try {
+      if (!RS.on && RS.fixRev && s && s.mannequin && s.pts && outA && outA.length >= 3 && isOrig()) {
+        var ixR = index();
+        if (ixR) {
+          var memR = s._rsr;
+          if (!memR || memR.ix !== ixR) {   // 판정은 본보기 표가 바뀔 때만(슬라이더마다 다시 안 함)
+            if (!ixR.dir0) ixR.dir0 = new Map();
+            var r0 = s.pts[0], RC = RS.rootCell, cx = Math.floor(r0.x / RC), cy = Math.floor(r0.y / RC), cz = Math.floor(r0.z / RC), sx = 0, sy = 0, sz = 0, sn = 0, a, b, c, t;
+            for (a = -2; a <= 2; a++) for (b = -2; b <= 2; b++) for (c = -2; c <= 2; c++) {
+              var Lc = ixR.cells.get(keyOf(cx + a, cy + b, cz + c)); if (!Lc) continue;
+              for (t = 0; t < Lc.length; t++) { var dv = ixR.dir0.get(Lc[t]); if (dv === undefined) { dv = initDir(ixR.arr[Lc[t]].pts); ixR.dir0.set(Lc[t], dv); } if (dv) { sx += dv[0]; sy += dv[1]; sz += dv[2]; sn++; } }
+            }
+            var mine = initDir(outA), bad = false, sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (mine && sn >= RS.revMinN && sl > 0.3 * sn && (mine[0] * sx + mine[1] * sy + mine[2] * sz) / sl < RS.revCos) bad = true;
+            var rp = null;
+            if (bad) {
+              var bi2 = nearest(ixR, r0);
+              if (bi2 >= 0) { var src2 = ixR.arr[bi2].pts, q2 = src2[0], k2; rp = new Array(src2.length); for (k2 = 0; k2 < src2.length; k2++) rp[k2] = { x: src2[k2].x + r0.x - q2.x, y: src2[k2].y + r0.y - q2.y, z: src2[k2].z + r0.z - q2.z }; if (RS.maxPts > 2 && rp.length > RS.maxPts) rp = resample(rp, RS.maxPts); ST.revFixed = (ST.revFixed || 0) + 1; }
+            }
+            memR = s._rsr = { ix: ixR, pts: rp };
+          }
+          if (memR.pts) {
+            var baseR = {}; try { var spR = W.ORIG_MQ.spec; baseR = Object.assign({}, (spR && spR.flowBase) || {}); if (spR && spR.perm && typeof spR.perm.curl === 'number') baseR.curl = spR.perm.curl; } catch (e) {}
+            return adjustRead(s, memR.pts, baseR, lenOverride, styOverride, null);
+          }
+        }
+      }
+    } catch (e) { if (!ST.err) ST.err = '거꾸로 고침: ' + (e && e.message || e); }
     try { if (s && s.mannequin && W.PHOTO_CURL && typeof W.PHOTO_CURL.activeRS === 'function') { var rs = W.PHOTO_CURL.activeRS(); if (rs && outA && outA.length > 1) { var o2 = W.PHOTO_CURL.applyShapeRS(RS.maxPts > 2 && outA.length > RS.maxPts ? resample(outA, RS.maxPts) : outA, rs); if (o2) { ST.rsShaped = (ST.rsShaped || 0) + 1; return o2; } } } } catch (e) {}   // (2026-10-12v) 다른 손님에게 건 스타일 — 결 표로 만든 길 위에 스타일에 실린 굴곡
     return outA;
   };
@@ -311,7 +323,7 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : '') + RS.maxPts + 'L' + RS.lockPull + 'o' + RS.offKeepCm + ':' + RS.offFadeCm + 'f' + RS.farCm + (RS.strayOn ? 'y' + RS.strayOut + ':' + RS.strayCos : ''); } } catch (e) {}
+    try { if (RS.on && isOrig()) { var m = model(); s += '|rs1:' + (m ? m.strands.length : 0) + (RS.shape ? 's' : '') + RS.maxPts + 'L' + RS.lockPull + 'o' + RS.offKeepCm + ':' + RS.offFadeCm; } else if (RS.fixRev && isOrig()) { var m2 = model(); s += '|rsR' + (m2 ? m2.strands.length : 0); } } catch (e) {}
     return s;
   };
 
@@ -343,7 +355,7 @@
     var b = ST.built, w = ST.wave, ro = ST.roots;
     return [TAG + ' ' + (RS.on ? '켜짐' : '꺼짐') +
       ' · 웨이브 사진 직모 뼈대 안 씀: ' + (!RS.waveRaw ? '꺼짐' : w ? (w.wave ? '웨이브(고리 ' + (+w.loop).toFixed(2) + ') → 읽은 길 그대로' : '고리 컬이라 예전대로') : '아직') +
-      ' · 옮겨심은 마네킹 가닥 ' + ST.used + ' / 본보기 못 찾아 예전 경로 ' + ST.fell + (ST.offPulled ? ' · 멀리서 옮겨 와 본보기 옆으로 붙인 가닥 ' + ST.offPulled : '') + (ST.curlAdd ? ' · 컬 더 감은 가닥 ' + ST.curlAdd : '') +
+      ' · 옮겨심은 마네킹 가닥 ' + ST.used + ' / 본보기 못 찾아 예전 경로 ' + ST.fell + (ST.revFixed ? ' · 거꾸로 선 마네킹 가닥을 바른 결로 고친 것 ' + ST.revFixed : '') + (ST.offPulled ? ' · 멀리서 옮겨 와 본보기 옆으로 붙인 가닥 ' + ST.offPulled : '') + (ST.curlAdd ? ' · 컬 더 감은 가닥 ' + ST.curlAdd : '') +
       (b ? '\n  본보기: 기른 가닥 ' + b.n + ' 중 ' + b.good + ' · 거꾸로 자란 가닥 ' + b.rev + '(42번이 위로 뒤집은 ' + b.flipN + ' 중 ' + b.revFlip + ') · 짧게 막힌 ' + b.short + ' · ' + b.ms + 'ms' : '') +
       (ro ? '\n  뿌리 고르게: 보통 밀도 ' + ro.base + ' · 올린 칸 ' + ro.up + ' · 내린 칸 ' + ro.down + ' · 남긴 칸 ' + ro.left : '') +
       (ST.err ? ' · ⚠ ' + ST.err : '')];

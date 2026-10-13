@@ -61,7 +61,8 @@
   'use strict';
   var W = window, TAG = '[어깨]';
   var H = W.SHOULDER = Object.assign({
-    on: false,          // (2026-10-12m) 다시 끔 — 몸통 메쉬를 조정 화면에도 불러와 가슴 높이 아래를 면에 눌러 가로줄·쭈글한 띠가 생김(10/7과 같은 이유) · 켜기 SHOULDER.on=true; SHOULDER.refresh()   // (2026-10-12g) 다시 켬 — 아래 natural 방식으로만(긴 웨이브 손님: 몸통을 통과한 아랫머리가 뜯겨 보임). 예전 기본 = false
+    on: true, resultOnly: true,   // (2026-10-13d) 3D 결과 화면에서만 켬 — 사용자: "머리를 어깨에 자연스럽게 내리기 안 되어 있다". 조정 화면의 가로줄·쭈글한 띠(12m에 끈 이유)는 조정 화면에서만 생겼으므로 조정 화면은 그대로 둠 · 예전 = SHOULDER.resultOnly=false
+    on_was12m: false,   // (2026-10-12m) 다시 끔 — 몸통 메쉬를 조정 화면에도 불러와 가슴 높이 아래를 면에 눌러 가로줄·쭈글한 띠가 생김(10/7과 같은 이유) · 켜기 SHOULDER.on=true; SHOULDER.refresh()   // (2026-10-12g) 다시 켬 — 아래 natural 방식으로만(긴 웨이브 손님: 몸통을 통과한 아랫머리가 뜯겨 보임). 예전 기본 = false
     natural: true,      // (2026-10-12g) 자연스럽게 놓기 — 몸통 안에 든 점만, 그 가닥이 몸통에 들어가기 직전 자리에서 가까운 면(앞/등)으로 밀어 얹음.
                         //   앞·뒤로 강제로 보내지 않고 · 몸통 밖에 뜬 점은 안 건드리고 · 목 구간은 안 건드림(10/7의 목 가로줄 원인 = '전부 등 쪽으로' 강제) · false = 아래 예전 규칙
     on_was: false,      // (2026-10-07) 기본 끔 — 머리가 만들어진 그대로 내려감. 켜기: SHOULDER.on=true; SHOULDER.refresh()
@@ -148,7 +149,7 @@
 
   /* 미리 불러와 재기. 돌려주는 Promise: true = 이번에 새로 쟀음 */
   H.ensure = function () {
-    if (!H.on || !H.preload) return Promise.resolve(false);
+    if (!H.on || !H.preload || H.resultOnly) return Promise.resolve(false);
     var key = photoKey();
     if (!key) return Promise.resolve(false);
     if (grid && gridKey === key) return Promise.resolve(false);
@@ -182,7 +183,7 @@
     return Promise.resolve(p).then(function (obj) {
       try {
         var key = photoKey();
-        if (H.on && obj && !(grid && gridKey === key)) measure(obj, key, '3D 결과 화면에서', (item && (item.name || item.id)) || '');
+        if (H.on && obj && !(grid && gridKey === key)) { measure(obj, key, '3D 결과 화면에서', (item && (item.name || item.id)) || ''); if (H.resultOnly && grid) { try { H.refresh(); } catch (e2) {} } }
       } catch (e) { console.warn(TAG + ' 재기 실패', e); }
       return obj;
     });
@@ -324,6 +325,7 @@
   var passMemo = new WeakMap();
   function pass(list) {
     if (!H.on || !grid || !list || !list.length) return list;
+    if (H.resultOnly && scr() === 'adjust') return list;   // (2026-10-13d)
     var hit = passMemo.get(list);
     if (hit && hit.ver === ver) return hit.out;
     var t0 = now(), n = list.length, out = new Array(n), i, k, e, p, np, st, r, top = grid.yTop + 0.6;
@@ -362,7 +364,7 @@
   // 서명 — 어깨가 새로 재지거나 꺼지면 미리 만든 헤어도 다시
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
-    return origFS.apply(this, arguments) + '|sh' + (H.on && grid ? ver + (H.natural ? 'n' : '') : 0);
+    return origFS.apply(this, arguments) + '|sh' + (H.on && grid && !(H.resultOnly && scr() === 'adjust') ? ver + (H.natural ? 'n' : '') : 0);
   };
 
   function redraw() {
