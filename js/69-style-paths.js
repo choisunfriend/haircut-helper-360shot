@@ -198,9 +198,24 @@
   var origFS = W.adjFilterSig;
   if (typeof origFS === 'function') W.adjFilterSig = function () {
     var s = origFS.apply(this, arguments);
-    try { var rp = activePaths(); if (rp) s += '|sp' + rp.n + ':' + rp.d.length + ':' + SP.offKeepCm; } catch (e) {}
+    try { var rp = activePaths(); if (rp) { s += '|sp' + rp.n + ':' + rp.d.length + ':' + SP.offKeepCm; btnSync(); } } catch (e) {}
     return s;
   };
+
+  /* (2026-10-13f) 버튼 표시 — 스타일 길이 있는 스타일은 마네킹 뿌리 자리만 쓰고 모양은 등록한 그대로라, 걸 때 [마네킹 초기화]를 OFF로 보이게
+   *  사용자: "마네킨 뿌리만 쓴다고. 그럼 상관없지. 버튼만 off로 해. 헷갈리니까" · 끄기 STYLE_PATHS.btnOff=false */
+  SP.btnOff = true;
+  function btnSync() {
+    try {
+      if (!SP.btnOff || !activePaths()) return;
+      var b = document.getElementById('mannequinBtn'); if (!b) return;
+      b.classList.remove('on'); if (b.textContent !== '마네킹 초기화 OFF') b.textContent = '마네킹 초기화 OFF';
+      b.title = '스타일 길이 든 스타일 — 마네킹 뿌리 자리만 쓰고 모양은 등록한 그대로';
+    } catch (e) {}
+  }
+  var innerSync = W.syncMannequinBtn;
+  if (typeof innerSync === 'function') W.syncMannequinBtn = function () { var r = innerSync.apply(this, arguments); btnSync(); return r; };
+  SP.btnSync = btnSync;
 
   SP.lines = function () {
     return [TAG + ' ' + (SP.on ? '켜짐' : '꺼짐') + ' · 기록한 칸 ' + REC.m.size + (ST.exportN ? ' · 직전 등록에 실은 길 ' + ST.exportN + '개(' + ST.exportKB + 'KB)' : '') +
