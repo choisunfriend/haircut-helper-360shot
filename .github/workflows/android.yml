@@ -1,1 +1,68 @@
+name: Android APK 빌드
 
+# 수동 실행(Actions 탭의 Run workflow 버튼)이 기본입니다.
+# main에 올릴 때마다 자동으로 굽고 싶으면 아래 push 블록의 주석을 벗기세요.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 저장소 내려받기
+        uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: JDK 설치
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK 준비
+        uses: android-actions/setup-android@v3
+
+      # 저장소 루트가 곧 웹 루트입니다. app/ 자신과 깃 관련 폴더만 빼고
+      # 통째로 app/www 로 복사합니다 (rsync의 --exclude app 이 재귀를 막습니다).
+      - name: 웹 자산을 app/www 로 복사
+        run: |
+          rm -rf app/www
+          mkdir -p app/www
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'app' \
+            ./ app/www/
+          test -f app/www/index.html || { echo "index.html 이 없습니다"; exit 1; }
+          echo "복사된 용량: $(du -sh app/www | cut -f1)"
+
+      - name: Capacitor 설치
+        working-directory: app
+        run: npm install
+
+      - name: 네이티브 프로젝트에 웹 자산 반영
+        working-directory: app
+        run: npx cap sync android
+
+      # 웹 UI로 올린 파일은 실행 권한이 날아갑니다. 직접 세워 줍니다.
+      - name: gradlew 실행 권한
+        run: chmod +x app/android/gradlew
+
+      - name: APK 빌드
+        working-directory: app/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: APK 올리기
+        uses: actions/upload-artifact@v4
+        with:
+          name: todays-style-peek-apk
+          path: app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
