@@ -1,7 +1,5 @@
 name: Android APK 빌드
 
-# 수동 실행(Actions 탭의 Run workflow 버튼)이 기본입니다.
-# main에 올릴 때마다 자동으로 굽고 싶으면 아래 push 블록의 주석을 벗기세요.
 on:
   workflow_dispatch:
   # push:
@@ -26,8 +24,21 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Android SDK 준비
-        uses: android-actions/setup-android@v3
+      # android-actions/setup-android 은 쓰지 않습니다. 그 액션이 기본으로 설치하려는
+      # 'tools' 패키지를 구글이 저장소에서 없애서 "Failed to find package 'tools'" 로 죽습니다.
+      # GitHub 러너에는 Android SDK가 이미 깔려 있으므로 라이선스만 받아 두면 됩니다.
+      # 필요한 플랫폼(android-36)과 빌드툴은 Gradle이 알아서 받아옵니다.
+      - name: Android SDK 라이선스 동의
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_HOME=$SDK"
+          test -n "$SDK" || { echo "Android SDK를 찾지 못했습니다"; exit 1; }
+          SM="$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          test -n "$SM" || SM="$(ls "$SDK"/tools/bin/sdkmanager 2>/dev/null | head -1)"
+          test -n "$SM" || { echo "sdkmanager를 찾지 못했습니다"; exit 1; }
+          echo "sdkmanager: $SM"
+          yes | "$SM" --licenses > /dev/null 2>&1 || true
+          echo "라이선스 동의 완료"
 
       # 저장소 루트가 곧 웹 루트입니다. app/ 자신과 깃 관련 폴더만 빼고
       # 통째로 app/www 로 복사합니다 (rsync의 --exclude app 이 재귀를 막습니다).
