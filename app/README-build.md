@@ -15,7 +15,7 @@ Capacitor 8.6.2 기준. `appId`는 저장소 설정을 그대로 썼습니다 (`
 | 필요한 것 | Android Studio (SDK 포함), JDK 21 | Xcode, Apple Developer 계정($99/년) |
 | 결과물 | `.apk` / `.aab` | `.ipa` (TestFlight 또는 App Store) |
 
-Node.js 20 이상이 필요합니다.
+Node.js 22 이상이 필요합니다.
 
 ---
 
