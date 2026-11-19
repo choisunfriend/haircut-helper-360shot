@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Today\'s style peek</string>
-    <string name="title_activity_main">Today\'s style peek</string>
-    <string name="package_name">kr.gyeol.haircuthelper</string>
-    <string name="custom_url_scheme">kr.gyeol.haircuthelper</string>
-</resources>
